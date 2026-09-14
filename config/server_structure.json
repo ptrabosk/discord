@@ -1,0 +1,199 @@
+{
+  "roles": [
+    "Verified",
+    "Professional Services",
+    "White Glove",
+    "Growth Strategy",
+    "Order Operations",
+    "Fashion Nova",
+    "Concierge",
+    "Concierge - Nadir",
+    "Concierge - Thandeka",
+    "Concierge - Mohammed",
+    "Concierge - Flex",
+    "Workflows",
+    "Leadership",
+    "Ops Bot Admin"
+  ],
+  "categories": [
+    {
+      "name": "SETUP",
+      "public": true,
+      "channels": [
+        {
+          "name": "initial-setup"
+        }
+      ]
+    },
+    {
+      "name": "OPERATIONS",
+      "public": true,
+      "channels": [
+        {
+          "name": "announcements"
+        },
+        {
+          "name": "general"
+        },
+        {
+          "name": "schedules"
+        },
+        {
+          "name": "help"
+        }
+      ]
+    },
+    {
+      "name": "PROFESSIONAL SERVICES",
+      "role": "Professional Services",
+      "channels": [
+        {
+          "name": "ps-announcements"
+        },
+        {
+          "name": "ps-questions"
+        },
+        {
+          "name": "ps-resources"
+        }
+      ]
+    },
+    {
+      "name": "WHITE GLOVE",
+      "role": "White Glove",
+      "channels": [
+        {
+          "name": "wg-announcements"
+        },
+        {
+          "name": "wg-questions"
+        },
+        {
+          "name": "wg-resources"
+        }
+      ]
+    },
+    {
+      "name": "GROWTH STRATEGY",
+      "role": "Growth Strategy",
+      "channels": [
+        {
+          "name": "gs-announcements"
+        },
+        {
+          "name": "gs-questions"
+        },
+        {
+          "name": "gs-resources"
+        }
+      ]
+    },
+    {
+      "name": "ORDER OPERATIONS",
+      "role": "Order Operations",
+      "channels": [
+        {
+          "name": "oo-announcements"
+        },
+        {
+          "name": "oo-questions"
+        },
+        {
+          "name": "oo-resources"
+        }
+      ]
+    },
+    {
+      "name": "FASHION NOVA",
+      "role": "Fashion Nova",
+      "channels": [
+        {
+          "name": "fn-announcements"
+        },
+        {
+          "name": "fn-questions"
+        },
+        {
+          "name": "fn-resources"
+        }
+      ]
+    },
+    {
+      "name": "CONCIERGE",
+      "role": "Concierge",
+      "channels": [
+        {
+          "name": "concierge-announcements"
+        },
+        {
+          "name": "team-nadir",
+          "role": "Concierge - Nadir"
+        },
+        {
+          "name": "team-thandeka",
+          "role": "Concierge - Thandeka"
+        },
+        {
+          "name": "team-mohammed",
+          "role": "Concierge - Mohammed"
+        },
+        {
+          "name": "team-flex",
+          "role": "Concierge - Flex"
+        }
+      ]
+    },
+    {
+      "name": "WORKFLOWS",
+      "role": "Workflows",
+      "channels": [
+        {
+          "name": "main",
+          "public": true
+        },
+        {
+          "name": "wiw-adjustments"
+        },
+        {
+          "name": "surveys"
+        }
+      ]
+    },
+    {
+      "name": "LEADERSHIP",
+      "role": "Leadership",
+      "channels": [
+        {
+          "name": "operations"
+        },
+        {
+          "name": "qa"
+        },
+        {
+          "name": "staffing"
+        },
+        {
+          "name": "reporting"
+        },
+        {
+          "name": "chat"
+        }
+      ]
+    },
+    {
+      "name": "CASUAL",
+      "public": true,
+      "channels": [
+        {
+          "name": "chat"
+        },
+        {
+          "name": "pets"
+        },
+        {
+          "name": "meme-department"
+        }
+      ]
+    }
+  ]
+}

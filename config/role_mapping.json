@@ -1,0 +1,32 @@
+{
+  "managed_roles": [
+    "Verified",
+    "Professional Services",
+    "White Glove",
+    "Growth Strategy",
+    "Order Operations",
+    "Fashion Nova",
+    "Concierge",
+    "Concierge - Nadir",
+    "Concierge - Thandeka",
+    "Concierge - Mohammed",
+    "Concierge - Flex",
+    "Workflows",
+    "Leadership"
+  ],
+  "sheet_columns": {
+    "Professional Services": "Professional Services",
+    "White Glove": "White Glove",
+    "Growth Strategy": "Growth Strategy",
+    "Order Operations": "Order Operations",
+    "Fashion Nova": "Fashion Nova",
+    "Workflows": "Workflows",
+    "Leadership": "Leadership"
+  },
+  "concierge_teams": {
+    "Nadir": "Concierge - Nadir",
+    "Thandeka": "Concierge - Thandeka",
+    "Mohammed": "Concierge - Mohammed",
+    "Flex": "Concierge - Flex"
+  }
+}
