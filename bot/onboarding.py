@@ -7,6 +7,7 @@ from database.database import (
 )
 from integrations.email_verification import send_verification_email
 from integrations.google_sheets import truthy
+from bot.guild_authorization import require_authorized_interaction
 from bot.permissions import sync_member_roles
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -30,6 +31,8 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
         self.sheet = sheet
 
     async def on_submit(self, interaction):
+        if not await require_authorized_interaction(interaction):
+            return
         email = str(self.email).strip().lower()
         if not EMAIL_RE.match(email) or not _allowed(email):
             await interaction.response.send_message(
@@ -68,6 +71,8 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
         self.sheet = sheet
 
     async def on_submit(self, interaction):
+        if not await require_authorized_interaction(interaction):
+            return
         row = get_code(interaction.user.id)
         max_attempts = int(os.getenv("VERIFICATION_MAX_ATTEMPTS","5"))
         if not row:
@@ -107,6 +112,8 @@ class CodeView(discord.ui.View):
 
     @discord.ui.button(label="Enter Verification Code", style=discord.ButtonStyle.primary)
     async def enter_code(self, interaction, button):
+        if not await require_authorized_interaction(interaction):
+            return
         await interaction.response.send_modal(CodeModal(self.sheet))
 
 class VerifyView(discord.ui.View):
@@ -116,4 +123,6 @@ class VerifyView(discord.ui.View):
 
     @discord.ui.button(label="Verify Work Email", style=discord.ButtonStyle.primary, custom_id="opsbot:verify")
     async def verify(self, interaction, button):
+        if not await require_authorized_interaction(interaction):
+            return
         await interaction.response.send_modal(EmailModal(self.sheet))

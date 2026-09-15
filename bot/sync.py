@@ -1,6 +1,12 @@
+import logging
+
 from discord.ext import tasks
 from database.database import list_verified_users, touch_sync, audit
+from bot.guild_authorization import get_authorized_guild_id, is_authorized_guild
 from bot.permissions import sync_member_roles
+
+
+logger = logging.getLogger(__name__)
 
 class AccessSync:
     def __init__(self, bot, sheet, guild_id, minutes):
@@ -11,8 +17,16 @@ class AccessSync:
 
     @tasks.loop(minutes=15)
     async def loop(self):
-        guild = self.bot.get_guild(self.guild_id)
+        authorized_guild_id = get_authorized_guild_id()
+        if self.guild_id != authorized_guild_id:
+            logger.error("Scheduled sync configured with a non-authorized guild; skipping run")
+            return
+        guild = self.bot.get_guild(authorized_guild_id)
         if not guild:
+            logger.warning("Authorized guild unavailable during scheduled sync; skipping run")
+            return
+        if not is_authorized_guild(guild):
+            logger.error("Scheduled sync resolved a non-authorized guild; skipping run")
             return
         for user_id, email in list_verified_users():
             try:

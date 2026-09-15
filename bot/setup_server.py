@@ -1,17 +1,22 @@
 import json
 from pathlib import Path
 import discord
+from bot.guild_authorization import is_authorized_guild
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = json.loads((ROOT/"config"/"server_structure.json").read_text())
 
 async def ensure_role(guild, name):
+    if not is_authorized_guild(guild):
+        raise RuntimeError("Refusing to create roles outside the authorized guild")
     role = discord.utils.get(guild.roles, name=name)
     if not role:
         role = await guild.create_role(name=name, reason="Ops Bot server setup")
     return role
 
 async def run_setup(guild):
+    if not is_authorized_guild(guild):
+        raise RuntimeError("Refusing to run server setup outside the authorized guild")
     role_map = {}
     for role_name in CONFIG["roles"]:
         role_map[role_name] = await ensure_role(guild, role_name)

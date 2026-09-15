@@ -1,6 +1,6 @@
 import discord
-from discord import app_commands
 from database.database import get_verified_user, audit
+from bot.guild_authorization import UNAUTHORIZED_MESSAGE, is_authorized_guild
 from bot.permissions import sync_member_roles
 
 def is_admin(interaction):
@@ -10,6 +10,9 @@ def register_commands(bot, sheet):
 
     @bot.tree.command(name="access_status", description="Show managed access status for a member")
     async def access_status(interaction: discord.Interaction, member: discord.Member):
+        if not is_authorized_guild(member.guild):
+            await interaction.response.send_message(UNAUTHORIZED_MESSAGE, ephemeral=True)
+            return
         if not is_admin(interaction):
             await interaction.response.send_message("Not authorized.", ephemeral=True)
             return
@@ -27,6 +30,9 @@ def register_commands(bot, sheet):
 
     @bot.tree.command(name="access_sync", description="Synchronize one member's managed roles")
     async def access_sync(interaction: discord.Interaction, member: discord.Member):
+        if not is_authorized_guild(member.guild):
+            await interaction.response.send_message(UNAUTHORIZED_MESSAGE, ephemeral=True)
+            return
         if not is_admin(interaction):
             await interaction.response.send_message("Not authorized.", ephemeral=True)
             return

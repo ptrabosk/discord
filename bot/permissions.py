@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import discord
+from bot.guild_authorization import is_authorized_guild
 from integrations.google_sheets import truthy
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,8 @@ def desired_roles(record):
     return desired
 
 async def sync_member_roles(member: discord.Member, record):
+    if not is_authorized_guild(member.guild):
+        raise RuntimeError("Refusing to modify roles outside the authorized guild")
     desired = desired_roles(record)
     current = {r.name for r in member.roles if r.name in MANAGED_ROLES}
 

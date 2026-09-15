@@ -68,8 +68,10 @@ Share the Google Sheet with the service-account email from `credentials.json` as
 
 1. Create a Discord application and bot in the Discord Developer Portal.
 2. Enable **Server Members Intent**.
-3. Invite it to the target server.
-4. Give it:
+3. In Discord, enable Developer Mode under **User Settings > Advanced**, right-click the target server icon, and select **Copy Server ID**.
+4. Put that ID in `.env` as `DISCORD_GUILD_ID=<copied server ID>`.
+5. Invite the bot to the target server.
+6. Give it:
    - View Channels
    - Send Messages
    - Read Message History
@@ -77,8 +79,10 @@ Share the Google Sheet with the service-account email from `credentials.json` as
    - Manage Roles
    - Manage Channels
    - Use Application Commands
-5. The bot role must be ABOVE every role it manages.
-6. Do not give Administrator unless needed temporarily for troubleshooting.
+7. The bot role must be ABOVE every role it manages.
+8. Do not give Administrator unless needed temporarily for troubleshooting.
+
+`DISCORD_GUILD_ID` is the only server where the bot is allowed to operate. The Discord application may remain Public so authorized users can install it, but the bot logs and automatically leaves every other server immediately without running setup, commands, interactions, or synchronization there.
 
 ## Install
 
@@ -93,7 +97,7 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Fill `.env` and put the Google service-account JSON at `credentials.json`.
+Fill `.env`, including the copied server ID in `DISCORD_GUILD_ID`, and put the Google service-account JSON at `credentials.json`.
 
 ## Email
 
