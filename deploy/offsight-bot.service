@@ -1,0 +1,27 @@
+[Unit]
+Description=Offsight Operations Discord Bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=offsightbot
+Group=offsightbot
+WorkingDirectory=/opt/offsight-bot/app
+ExecStart=/opt/offsight-bot/app/.venv/bin/python /opt/offsight-bot/app/main.py
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+
+# Conservative hardening that retains outbound Discord, Google, and SMTP access.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

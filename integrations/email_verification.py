@@ -1,6 +1,11 @@
 import os
 import smtplib
+import logging
 from email.message import EmailMessage
+
+
+logger = logging.getLogger(__name__)
+
 
 def send_verification_email(recipient, code):
     msg = EmailMessage()
@@ -14,10 +19,14 @@ def send_verification_email(recipient, code):
     )
     host = os.environ["SMTP_HOST"]
     port = int(os.getenv("SMTP_PORT", "587"))
-    with smtplib.SMTP(host, port) as smtp:
-        smtp.starttls()
-        username = os.getenv("SMTP_USERNAME")
-        password = os.getenv("SMTP_PASSWORD")
-        if username:
-            smtp.login(username, password)
-        smtp.send_message(msg)
+    try:
+        with smtplib.SMTP(host, port) as smtp:
+            smtp.starttls()
+            username = os.getenv("SMTP_USERNAME")
+            password = os.getenv("SMTP_PASSWORD")
+            if username:
+                smtp.login(username, password)
+            smtp.send_message(msg)
+    except Exception:
+        logger.exception("SMTP verification delivery failed")
+        raise

@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 import discord
 
@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 UNAUTHORIZED_MESSAGE = "This bot is not authorized for this server."
 
-_authorized_guild_id: int | None = None
+_authorized_guild_id: Optional[int] = None
 
 
 def load_authorized_guild_id() -> int:
@@ -61,4 +61,3 @@ async def require_authorized_interaction(interaction: discord.Interaction) -> bo
     else:
         await interaction.response.send_message(UNAUTHORIZED_MESSAGE, ephemeral=True)
     return False
-
