@@ -8,6 +8,12 @@ ROLE_CONFIG = json.loads((ROOT/"config"/"role_mapping.json").read_text())
 
 MANAGED_ROLES = set(ROLE_CONFIG["managed_roles"])
 
+def is_admin(interaction):
+    return (
+        interaction.user.guild_permissions.administrator
+        or any(role.name == "Ops Bot Admin" for role in interaction.user.roles)
+    )
+
 def desired_roles(record):
     if not record or not truthy(record.get("Active")):
         return set()

@@ -1,3 +1,4 @@
+import asyncio
 from discord.ext import tasks
 from database.database import list_verified_users, touch_sync, audit
 from bot.permissions import sync_member_roles
@@ -19,7 +20,7 @@ class AccessSync:
                 member = guild.get_member(user_id)
                 if not member:
                     continue
-                record = self.sheet.get_by_email(email)
+                record = await asyncio.to_thread(self.sheet.get_by_email, email)
                 added, removed = await sync_member_roles(member, record)
                 touch_sync(user_id)
                 if added or removed:

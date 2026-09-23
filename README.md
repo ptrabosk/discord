@@ -62,7 +62,77 @@ Boolean access fields accept TRUE/YES/1/X.
 
 `Concierge Team` accepts Nadir, Thandeka, Mohammed, or Flex. Multiple teams can be comma-separated.
 
-Share the Google Sheet with the service-account email from `credentials.json` as Viewer.
+Share the access-roster Sheet with the service-account email from `credentials.json` as Viewer.
+
+## Employee forms
+
+Verified employees start Timesheet Adjustments, Emergency Shift Releases, Questions,
+Concerns, and Feedback with `/form`. All employee prompts and confirmations are private/ephemeral;
+no public launcher message is needed. Previously posted `Submit a Form` buttons still work, but the
+bot no longer posts new ones. Submissions still post review cards to configured private reviewer
+channels. Identity comes from the verified-user database and the `Name`/`Email` fields in the
+access roster; users never enter identity manually.
+
+### Editing form questions and answers
+
+Edit [`config/forms.json`](config/forms.json), then restart the bot. It contains:
+
+- `form_names`: the top-level choices shown to employees.
+- `when_i_work_names`: the two When I Work choices.
+- `categories`: the Question, Concern, and Feedback category answers.
+- `adjustment_types`: the Timesheet Adjustment type answers.
+- `start_hours`: available start times as 24-hour numbers (for example, `14` shows as `2pm`).
+- `prompts`: the wording shown at each selection step.
+- `message_fields`: each form's modal title, required paragraph question, and placeholder.
+
+Change the displayed labels and answer lists, but **do not rename the JSON keys** such as
+`question` or `timesheet_adjustment`: those are stable IDs used by SQLite, Sheets, and review
+logic. Discord allows at most 25 answers in a select, and labels have length limits; the bot
+validates the file at startup. Adding an entirely new field or form type still requires code and
+storage changes. Run `.venv/bin/python -m unittest discover -s tests -v` before restarting.
+
+Set `GOOGLE_FORMS_SHEET_ID` to a separate spreadsheet ID. If it is blank, forms use
+`GOOGLE_SHEET_ID`. Share the forms spreadsheet with the service account as **Editor**. The bot
+uses the read/write `https://www.googleapis.com/auth/spreadsheets` OAuth scope; per-file Google
+sharing still allows the access-roster Sheet to remain Viewer-only.
+
+The bot creates missing forms tabs when permitted. Existing tabs must have these exact headers:
+
+- `WIW Timesheet Adjustments`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
+  Employee Email, Employee Name, Status, Adjustment Type, Start Time ET, Start Time UTC, End Time ET,
+  End Time UTC, Adjustment Reason, Reviewed By, Reviewed At ET, Reviewed At UTC
+- `WIW Emergency Releases`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
+  Employee Email, Employee Name, Status, Shift Start ET, Shift Start UTC, Release Reason, Reviewed By,
+  Reviewed At ET, Reviewed At UTC
+- `Questions Concerns Feedback`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
+  Employee Email, Employee Name, Type, Category, Message, Status, Reviewed By, Reviewed At ET,
+  Reviewed At UTC
+
+Configure private Discord review channels by numeric ID:
+
+- `WIW_REVIEW_CHANNEL_ID`
+- `QUESTION_REVIEW_CHANNEL_ID`
+- `CONCERN_REVIEW_CHANNEL_ID`
+- `FEEDBACK_REVIEW_CHANNEL_ID`
+
+The three general form types may use the same channel ID. The bot refuses to post employee data to
+a channel visible to `@everyone`. Set `FORM_ERROR_CHANNEL_ID` to a private operations channel for
+technical form errors; it defaults to `1550994656966344714`. Error alerts contain only an event
+type and reference, not employee messages or credentials. An agent is told about delivery trouble
+only if both the review-channel post and Sheets write fail. Existing launcher buttons and reviewer
+buttons survive bot restarts.
+
+Timesheet Adjustments show one date menu containing today and the previous 14 days in New York.
+The end date is automatically the same as the selected start date; employees choose only the end
+time. Emergency Shift Releases keep the range-then-date picker, configurable with
+`FORM_DATE_PAST_DAYS` and `FORM_DATE_FUTURE_DAYS` (maximum 350 selectable dates). Start times are
+selected from `start_hours` in `config/forms.json`, with minutes fixed at `:00`; end times are
+selected by hour and then `00`, `15`, `30`, or `45`. Local datetimes use `America/New_York` and are
+stored in both ET and UTC.
+
+SQLite is the durable source of truth. A submission succeeds once it is stored locally. Sheets
+sync retries every `FORM_SHEETS_RETRY_MINUTES` and searches column A for the Submission ID before
+appending, so retries update the existing row rather than duplicating it.
 
 ## Discord application setup
 
@@ -146,6 +216,8 @@ Members with `Ops Bot Admin` or Discord Administrator can use:
 
 - `/access_status @member`
 - `/access_sync @member`
+
+Any verified employee can run `/form` privately.
 
 ## Notes
 

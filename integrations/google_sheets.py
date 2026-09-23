@@ -2,7 +2,7 @@ import os
 import gspread
 from google.oauth2.service_account import Credentials
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 class AccessSheet:
     def __init__(self):

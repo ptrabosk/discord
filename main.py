@@ -1,4 +1,5 @@
 import os, sys, asyncio
+import logging
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -9,12 +10,15 @@ from bot.setup_server import run_setup
 from bot.onboarding import VerifyView
 from bot.commands import register_commands
 from bot.sync import AccessSync
+from forms.service import FormsService, FormsSync
+from forms.views import register_forms
 
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", "0"))
 SYNC_MINUTES = int(os.getenv("SYNC_INTERVAL_MINUTES", "15"))
+FORMS_SYNC_MINUTES = int(os.getenv("FORM_SHEETS_RETRY_MINUTES", "5"))
 
 if not TOKEN or not GUILD_ID:
     raise RuntimeError("Set DISCORD_BOT_TOKEN and DISCORD_GUILD_ID in .env")
@@ -25,12 +29,15 @@ intents.members = True
 class OpsBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
+        self.guild_id = GUILD_ID
         self.sheet = AccessSheet()
+        self.forms = FormsService(self, self.sheet)
         self.synced_commands = False
 
     async def setup_hook(self):
         self.add_view(VerifyView(self.sheet))
         register_commands(self, self.sheet)
+        register_forms(self, self.forms)
         guild_obj = discord.Object(id=GUILD_ID)
         self.tree.copy_global_to(guild=guild_obj)
         await self.tree.sync(guild=guild_obj)
@@ -43,6 +50,9 @@ async def on_ready():
     if not hasattr(bot, "_access_sync"):
         bot._access_sync = AccessSync(bot, bot.sheet, GUILD_ID, SYNC_MINUTES)
         bot._access_sync.loop.start()
+    if not hasattr(bot, "_forms_sync"):
+        bot._forms_sync = FormsSync(bot, bot.forms, FORMS_SYNC_MINUTES)
+        bot._forms_sync.loop.start()
 
 async def post_setup_message(guild):
     channel = discord.utils.get(guild.text_channels, name="initial-setup")
@@ -80,7 +90,9 @@ async def run_setup_when_ready():
     await bot.close()
 
 if __name__ == "__main__":
+    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
     init_db()
+    bot.forms.repository.init()
     if len(sys.argv) > 1 and sys.argv[1].lower() == "setup":
         async def runner():
             task = asyncio.create_task(run_setup_when_ready())

@@ -1,0 +1,66 @@
+{
+  "form_names": {
+    "when_i_work": "When I Work",
+    "question": "Question",
+    "concern": "Concern",
+    "feedback": "Feedback"
+  },
+  "when_i_work_names": {
+    "timesheet_adjustment": "Timesheet Adjustment",
+    "emergency_shift_release": "Emergency Shift Release"
+  },
+  "categories": [
+    "Performance",
+    "Quality",
+    "Pay",
+    "Position",
+    "Scheduling",
+    "Training",
+    "Tools / Systems",
+    "General"
+  ],
+  "adjustment_types": [
+    "Missed clock-in",
+    "Missed clock-out",
+    "Incorrect start time",
+    "Incorrect end time",
+    "Other"
+  ],
+  "start_hours": [8, 10, 12, 14, 16, 18, 20, 22],
+  "prompts": {
+    "form_type": "Choose a form type.",
+    "when_i_work": "Form",
+    "category": "Category.",
+    "adjustment_type": "Adjustment type",
+    "start_date": "Start date",
+    "start_hour": "Start time",
+    "end_hour": "End hour"
+  },
+  "message_fields": {
+    "timesheet_adjustment": {
+      "title": "Timesheet Adjustment",
+      "question": "Adjustment Reason",
+      "placeholder": "Explain what needs to be corrected"
+    },
+    "emergency_shift_release": {
+      "title": "Emergency Shift Release",
+      "question": "Release Reason",
+      "placeholder": "Explain why you need to release this shift"
+    },
+    "question": {
+      "title": "Question",
+      "question": "Question",
+      "placeholder": "Type your question"
+    },
+    "concern": {
+      "title": "Concern",
+      "question": "Concern",
+      "placeholder": "Describe your concern"
+    },
+    "feedback": {
+      "title": "Feedback",
+      "question": "Feedback",
+      "placeholder": "Type your feedback"
+    }
+  }
+}

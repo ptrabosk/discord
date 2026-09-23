@@ -1,3 +1,4 @@
+import asyncio
 import os, re, secrets, hashlib, hmac
 from datetime import datetime, timedelta, timezone
 import discord
@@ -38,7 +39,7 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
             )
             return
 
-        record = self.sheet.get_by_email(email)
+        record = await asyncio.to_thread(self.sheet.get_by_email, email)
         existing = get_verified_by_email(email)
         if not record or not truthy(record.get("Active")) or (existing and existing[0] != interaction.user.id):
             audit(interaction.user.id, email, "VERIFICATION_FAILED", "Email not authorized or already linked")
@@ -53,7 +54,7 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
             minutes=int(os.getenv("VERIFICATION_EXPIRY_MINUTES","10"))
         )).isoformat()
         save_code(interaction.user.id, email, _hash(code), expiry)
-        send_verification_email(email, code)
+        await asyncio.to_thread(send_verification_email, email, code)
         audit(interaction.user.id, email, "VERIFICATION_SENT")
         await interaction.response.send_message(
             f"Verification email sent to {_mask(email)}.",
@@ -85,7 +86,7 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
             return
 
         # Re-read source of truth immediately before authorization.
-        record = self.sheet.get_by_email(email)
+        record = await asyncio.to_thread(self.sheet.get_by_email, email)
         if not record or not truthy(record.get("Active")):
             delete_code(interaction.user.id)
             await interaction.response.send_message(
