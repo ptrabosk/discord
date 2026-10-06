@@ -4,3 +4,14 @@ credentials.json
 __pycache__/
 *.pyc
 .venv/
+.env.*
+!.env*.example
+token.json
+*.pem
+*.key
+*.sqlite
+*.sqlite3
+.pytest_cache/
+AGENTS.md
+CLAUDE.md
+.claude/

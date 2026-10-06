@@ -165,6 +165,16 @@ copy .env.example .env
 
 Fill `.env` and put the Google service-account JSON at `credentials.json`.
 
+## Development tests
+
+Use a separate development environment so the production virtual environment stays runtime-only:
+
+```bash
+python -m venv .venv-dev
+.venv-dev/bin/pip install -r requirements-dev.txt
+.venv-dev/bin/python -m pytest
+```
+
 ## Email
 
 Configure SMTP in `.env`. The SMTP account sends six-digit verification codes.
