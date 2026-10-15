@@ -4,13 +4,44 @@ from datetime import datetime, timedelta, timezone
 import discord
 from database.database import (
     save_code, get_code, increment_attempts, delete_code,
-    get_verified_by_email, save_verified_user, audit
+    get_verified_by_email, save_verified_user, audit, count_audit_since
 )
 from integrations.email_verification import send_verification_email
 from integrations.google_sheets import truthy
 from bot.permissions import sync_member_roles
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# Per Discord user and per email, over 24 hours. A new code resets the per-code attempt
+# count, so these caps are what bound the total number of guesses against one address.
+DAILY_CODES = 5
+DAILY_FAILED_GUESSES = 10
+THROTTLED = "Too many verification attempts. Try again later or contact Operations."
+
+def _day_ago():
+    return (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+
+def guesses_exhausted(user_id, email):
+    since = _day_ago()
+    return max(
+        count_audit_since("VERIFICATION_FAILED", since, user_id=user_id, details="Incorrect code"),
+        count_audit_since("VERIFICATION_FAILED", since, email=email, details="Incorrect code"),
+    ) >= DAILY_FAILED_GUESSES
+
+def code_request_blocked(user_id, email):
+    """Why a new code must not be sent now, or None."""
+    pending = get_code(user_id)
+    resend_seconds = int(os.getenv("VERIFICATION_RESEND_SECONDS", "60"))
+    if pending and datetime.now(timezone.utc) - datetime.fromisoformat(pending[4]) < timedelta(seconds=resend_seconds):
+        return "resend_cooldown"
+    since = _day_ago()
+    if max(
+        count_audit_since("VERIFICATION_SENT", since, user_id=user_id),
+        count_audit_since("VERIFICATION_SENT", since, email=email),
+    ) >= DAILY_CODES:
+        return "daily_code_limit"
+    if guesses_exhausted(user_id, email):
+        return "daily_guess_limit"
+    return None
 
 def _hash(code):
     return hashlib.sha256(code.encode()).hexdigest()
@@ -37,6 +68,13 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
                 "We couldn't verify this email. Contact Operations if you believe you should have access.",
                 ephemeral=True
             )
+            return
+
+        # Checked before the sheet lookup so the answer does not reveal whether the email is authorized.
+        blocked = code_request_blocked(interaction.user.id, email)
+        if blocked:
+            audit(interaction.user.id, email, "VERIFICATION_THROTTLED", blocked)
+            await interaction.response.send_message(THROTTLED, ephemeral=True)
             return
 
         record = await asyncio.to_thread(self.sheet.get_by_email, email)
@@ -75,6 +113,11 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
             await interaction.response.send_message("No active verification request. Start again.", ephemeral=True)
             return
         email, code_hash, expires_at, attempts, _ = row
+        if guesses_exhausted(interaction.user.id, email):
+            delete_code(interaction.user.id)
+            audit(interaction.user.id, email, "VERIFICATION_THROTTLED", "daily_guess_limit")
+            await interaction.response.send_message(THROTTLED, ephemeral=True)
+            return
         if attempts >= max_attempts or datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
             delete_code(interaction.user.id)
             await interaction.response.send_message("Verification expired. Start again.", ephemeral=True)

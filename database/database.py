@@ -46,6 +46,17 @@ def audit(user_id, email, action, details=""):
             (now(), user_id, email, action, details)
         )
 
+def count_audit_since(action, since, user_id=None, email=None, details=None):
+    clauses, params = ["action=?", "timestamp>=?"], [action, since]
+    if user_id is not None:
+        clauses.append("discord_user_id=?"); params.append(user_id)
+    if email is not None:
+        clauses.append("lower(email)=lower(?)"); params.append(email)
+    if details is not None:
+        clauses.append("details=?"); params.append(details)
+    with connect() as con:
+        return con.execute(f"SELECT count(*) FROM audit_log WHERE {' AND '.join(clauses)}", params).fetchone()[0]
+
 def get_verified_user(user_id):
     with connect() as con:
         row = con.execute(

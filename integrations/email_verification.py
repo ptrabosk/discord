@@ -1,5 +1,6 @@
 import os
 import smtplib
+import ssl
 from email.message import EmailMessage
 
 def send_verification_email(recipient, code):
@@ -14,8 +15,9 @@ def send_verification_email(recipient, code):
     )
     host = os.environ["SMTP_HOST"]
     port = int(os.getenv("SMTP_PORT", "587"))
-    with smtplib.SMTP(host, port) as smtp:
-        smtp.starttls()
+    # Without an explicit context, starttls() does not verify the server certificate.
+    with smtplib.SMTP(host, port, timeout=15) as smtp:
+        smtp.starttls(context=ssl.create_default_context())
         username = os.getenv("SMTP_USERNAME")
         password = os.getenv("SMTP_PASSWORD")
         if username:
