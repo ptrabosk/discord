@@ -1,6 +1,5 @@
 import asyncio
 import discord
-from discord import app_commands
 from database.database import get_verified_user, audit
 from bot.permissions import is_admin, sync_member_roles
 

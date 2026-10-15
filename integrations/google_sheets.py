@@ -23,8 +23,5 @@ class AccessSheet:
                 return row
         return None
 
-    def all_records(self):
-        return self._worksheet().get_all_records()
-
 def truthy(value):
     return str(value).strip().lower() in {"true","1","yes","y","x"}

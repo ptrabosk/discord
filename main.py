@@ -32,7 +32,6 @@ class OpsBot(commands.Bot):
         self.guild_id = GUILD_ID
         self.sheet = AccessSheet()
         self.forms = FormsService(self, self.sheet)
-        self.synced_commands = False
 
     async def setup_hook(self):
         self.add_view(VerifyView(self.sheet))
