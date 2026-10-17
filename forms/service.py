@@ -35,6 +35,57 @@ REVIEW_CHANNEL_ENV = {
 DEFAULT_FORM_ERROR_CHANNEL_ID = 1550994656966344714
 
 
+
+def validate_submission(state: FormState, message: str) -> None:
+    sheet_tab_for(state.form_type, state.form_subtype)
+    if not message.strip():
+        raise ValueError("A message or reason is required.")
+    if state.form_type in {"question", "concern", "feedback"}:
+        validate_category(state.category)
+    if state.form_subtype == "timesheet_adjustment":
+        if state.adjustment_type not in ADJUSTMENT_TYPES:
+            raise ValueError("A valid adjustment type is required.")
+    elif state.adjustment_type is not None:
+        raise ValueError("Adjustment type is only valid for timesheet adjustments.")
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def submission_values(
+    interaction: discord.Interaction,
+    state: FormState,
+    message: str,
+    email: str,
+    employee_name: str,
+    submitted_utc: datetime,
+) -> dict:
+    """The form_submissions row for a validated form; When I Work forms carry their start and end times."""
+    start_et = start_utc = end_et = end_utc = None
+    if state.form_type == "when_i_work":
+        start_et, start_utc, end_et, end_utc = form_datetimes(state)
+    return {
+        "interaction_id": str(interaction.id),
+        "form_type": state.form_type,
+        "form_subtype": state.form_subtype,
+        "discord_user_id": interaction.user.id,
+        "discord_username": str(interaction.user),
+        "discord_display_name": interaction.user.display_name,
+        "employee_email": email,
+        "employee_name": employee_name,
+        "submitted_at_utc": submitted_utc.isoformat(),
+        "submitted_at_et": submitted_utc.astimezone(EASTERN).isoformat(),
+        "category": state.category,
+        "adjustment_type": state.adjustment_type,
+        "start_time_et": _iso(start_et),
+        "start_time_utc": _iso(start_utc),
+        "end_time_et": _iso(end_et),
+        "end_time_utc": _iso(end_utc),
+        "message": message.strip(),
+    }
+
+
 class FormsService:
     def __init__(self, bot, access_sheet):
         self.bot = bot
@@ -90,75 +141,48 @@ class FormsService:
         if interaction.guild_id != self.bot.guild_id:
             raise PermissionError("Forms can only be submitted in the authorized server.")
         email, employee_name = await self.employee_identity(interaction.user.id)
-        sheet_tab_for(state.form_type, state.form_subtype)
-        if not message.strip():
-            raise ValueError("A message or reason is required.")
-        if state.form_type in {"question", "concern", "feedback"}:
-            validate_category(state.category)
-        if state.form_subtype == "timesheet_adjustment":
-            if state.adjustment_type not in ADJUSTMENT_TYPES:
-                raise ValueError("A valid adjustment type is required.")
-        elif state.adjustment_type is not None:
-            raise ValueError("Adjustment type is only valid for timesheet adjustments.")
-
-        start_et = start_utc = end_et = end_utc = None
-        if state.form_type == "when_i_work":
-            start_et, start_utc, end_et, end_utc = form_datetimes(state)
-
-        submitted_utc = datetime.now(timezone.utc)
-        submitted_et = submitted_utc.astimezone(EASTERN)
-        values = {
-            "interaction_id": str(interaction.id),
-            "form_type": state.form_type,
-            "form_subtype": state.form_subtype,
-            "discord_user_id": interaction.user.id,
-            "discord_username": str(interaction.user),
-            "discord_display_name": interaction.user.display_name,
-            "employee_email": email,
-            "employee_name": employee_name,
-            "submitted_at_utc": submitted_utc.isoformat(),
-            "submitted_at_et": submitted_et.isoformat(),
-            "category": state.category,
-            "adjustment_type": state.adjustment_type,
-            "start_time_et": start_et.isoformat() if start_et else None,
-            "start_time_utc": start_utc.isoformat() if start_utc else None,
-            "end_time_et": end_et.isoformat() if end_et else None,
-            "end_time_utc": end_utc.isoformat() if end_utc else None,
-            "message": message.strip(),
-        }
+        validate_submission(state, message)
+        values = submission_values(interaction, state, message, email, employee_name, datetime.now(timezone.utc))
         async with self._submission_lock:
             row, created = self.repository.create(values)
             if created:
-                try:
-                    audit(
-                        interaction.user.id,
-                        email,
-                        "FORM_SUBMITTED",
-                        f"Submission={row['submission_id']}; Type={state.form_type}; "
-                        f"Subtype={state.form_subtype or ''}",
-                    )
-                except Exception as exc:
-                    log.exception("Could not audit form submission %s", row["submission_id"])
-                    await self.alert_error("submission_audit_failed", row=row, error=exc)
-            if row["sheets_sync_status"] != "SYNCED":
-                try:
-                    row["_sheets_synced"] = await self.sync_one(row)
-                except Exception as exc:
-                    log.exception("Unexpected Sheets delivery error for %s", row["submission_id"])
-                    await self.alert_error("sheets_delivery_failed", row=row, error=exc)
-                    row["_sheets_synced"] = False
-            else:
-                row["_sheets_synced"] = True
-            if row.get("review_message_id"):
-                row["_review_posted"] = True
-            else:
-                try:
-                    row["_review_posted"] = await self.post_review(row)
-                except Exception as exc:
-                    log.exception("Unexpected review delivery error for %s", row["submission_id"])
-                    await self.alert_error("discord_review_delivery_failed", row=row, error=exc)
-                    row["_review_posted"] = False
+                await self._audit_submission(interaction.user.id, email, state, row)
+            row["_sheets_synced"] = await self._deliver_to_sheets(row)
+            row["_review_posted"] = await self._deliver_review(row)
             return row
+
+    async def _audit_submission(self, user_id: int, email: str, state: FormState, row: dict) -> None:
+        try:
+            audit(
+                user_id,
+                email,
+                "FORM_SUBMITTED",
+                f"Submission={row['submission_id']}; Type={state.form_type}; "
+                f"Subtype={state.form_subtype or ''}",
+            )
+        except Exception as exc:
+            log.exception("Could not audit form submission %s", row["submission_id"])
+            await self.alert_error("submission_audit_failed", row=row, error=exc)
+
+    async def _deliver_to_sheets(self, row: dict) -> bool:
+        if row["sheets_sync_status"] == "SYNCED":
+            return True
+        try:
+            return await self.sync_one(row)
+        except Exception as exc:
+            log.exception("Unexpected Sheets delivery error for %s", row["submission_id"])
+            await self.alert_error("sheets_delivery_failed", row=row, error=exc)
+            return False
+
+    async def _deliver_review(self, row: dict) -> bool:
+        if row.get("review_message_id"):
+            return True
+        try:
+            return await self.post_review(row)
+        except Exception as exc:
+            log.exception("Unexpected review delivery error for %s", row["submission_id"])
+            await self.alert_error("discord_review_delivery_failed", row=row, error=exc)
+            return False
 
     async def sync_one(self, row: dict):
         try:
