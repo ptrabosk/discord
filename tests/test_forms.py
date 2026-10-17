@@ -5,7 +5,7 @@ import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from database.forms_repository import FormsRepository
 from forms.domain import (
@@ -291,3 +291,89 @@ class FormDateSelectionTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubmitTests(unittest.IsolatedAsyncioTestCase):
+    """FormsService.submit: validation, the stored row, and delivery to Sheets and the review channel."""
+
+    async def asyncSetUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.service = FormsService(SimpleNamespace(guild_id=1), SimpleNamespace(client=object()))
+        self.service.repository = FormsRepository(Path(self.directory.name) / "forms.db")
+        self.service.repository.init()
+        self.service.employee_identity = AsyncMock(return_value=("employee@example.com", "Employee Name"))
+        self.service.sync_one = AsyncMock(return_value=True)
+        self.service.post_review = AsyncMock(return_value=True)
+        self.service.alert_error = AsyncMock()
+        self.audit = patch("forms.service.audit").start()
+        self.addCleanup(patch.stopall)
+        self.addCleanup(self.directory.cleanup)
+
+    def interaction(self, interaction_id=1001, guild_id=1):
+        user = type("User", (), {"id": 123, "display_name": "Employee", "__str__": lambda self: "employee"})()
+        return SimpleNamespace(id=interaction_id, guild_id=guild_id, user=user)
+
+    async def test_rejects_other_servers_empty_messages_and_bad_choices(self):
+        with self.assertRaisesRegex(PermissionError, "authorized server"):
+            await self.service.submit(self.interaction(guild_id=2), FormState("question", category="Pay"), "hi")
+        with self.assertRaisesRegex(ValueError, "message or reason is required"):
+            await self.service.submit(self.interaction(), FormState("question", category="Pay"), "   ")
+        with self.assertRaisesRegex(ValueError, "Unknown form category"):
+            await self.service.submit(self.interaction(), FormState("question", category="Nope"), "hi")
+        with self.assertRaisesRegex(ValueError, "valid adjustment type"):
+            await self.service.submit(self.interaction(), FormState("when_i_work", "timesheet_adjustment", adjustment_type="Not a type"), "hi")
+        with self.assertRaisesRegex(ValueError, "only valid for timesheet adjustments"):
+            await self.service.submit(self.interaction(), FormState("question", category="Pay", adjustment_type="Missed clock-in"), "hi")
+        with self.assertRaisesRegex(ValueError, "Unknown form type"):
+            await self.service.submit(self.interaction(), FormState("nonsense"), "hi")
+        self.audit.assert_not_called()
+
+    async def test_stores_the_submission_audits_it_and_delivers_it(self):
+        row = await self.service.submit(self.interaction(), FormState("question", category="Pay"), "  Where is my pay?  ")
+        self.assertEqual(row["message"], "Where is my pay?")
+        self.assertEqual((row["form_type"], row["category"], row["employee_email"], row["employee_name"]), ("question", "Pay", "employee@example.com", "Employee Name"))
+        self.assertIsNone(row["start_time_et"])
+        self.assertTrue(row["_sheets_synced"])
+        self.assertTrue(row["_review_posted"])
+        self.audit.assert_called_once()
+        self.assertEqual(self.audit.call_args.args[2], "FORM_SUBMITTED")
+        self.assertIn(row["submission_id"], self.audit.call_args.args[3])
+        self.service.sync_one.assert_awaited_once()
+        self.service.post_review.assert_awaited_once()
+
+    async def test_a_repeated_interaction_is_not_audited_twice(self):
+        first = await self.service.submit(self.interaction(), FormState("question", category="Pay"), "hi")
+        second = await self.service.submit(self.interaction(), FormState("question", category="Pay"), "hi")
+        self.assertEqual(first["submission_id"], second["submission_id"])
+        self.audit.assert_called_once()
+
+    async def test_timesheet_adjustment_records_both_times(self):
+        state = FormState("when_i_work", "timesheet_adjustment", adjustment_type="Missed clock-in",
+                          start_date=date(2026, 7, 15), start_hour=START_HOURS[0], start_minute=0, end_hour=START_HOURS[0] + 2, end_minute=30)
+        row = await self.service.submit(self.interaction(), state, "Forgot to clock in")
+        self.assertEqual(START_HOURS[0], 8)
+        self.assertEqual(row["start_time_utc"], "2026-07-15T12:00:00+00:00")
+        self.assertEqual(row["end_time_et"], "2026-07-15T10:30:00-04:00")
+        self.assertEqual(row["adjustment_type"], "Missed clock-in")
+
+    async def test_delivery_failures_are_alerted_and_reported_on_the_row(self):
+        self.service.sync_one.side_effect = RuntimeError("sheets down")
+        self.service.post_review.side_effect = RuntimeError("discord down")
+        self.audit.side_effect = RuntimeError("audit down")
+        row = await self.service.submit(self.interaction(), FormState("feedback", category="Pay"), "hi")
+        self.assertFalse(row["_sheets_synced"])
+        self.assertFalse(row["_review_posted"])
+        kinds = [call.args[0] for call in self.service.alert_error.await_args_list]
+        self.assertEqual(kinds, ["submission_audit_failed", "sheets_delivery_failed", "discord_review_delivery_failed"])
+
+    async def test_already_delivered_rows_are_not_sent_again(self):
+        row = await self.service.submit(self.interaction(), FormState("question", category="Pay"), "hi")
+        self.service.repository.mark_synced(row["submission_id"])
+        self.service.repository.set_review_message(row["submission_id"], 77, 555)
+        self.service.sync_one.reset_mock()
+        self.service.post_review.reset_mock()
+        again = await self.service.submit(self.interaction(), FormState("question", category="Pay"), "hi")
+        self.assertTrue(again["_sheets_synced"])
+        self.assertTrue(again["_review_posted"])
+        self.service.sync_one.assert_not_awaited()
+        self.service.post_review.assert_not_awaited()
