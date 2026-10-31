@@ -30,7 +30,7 @@ intents.members = True
 
 class OpsBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix="!", intents=intents)
+        super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.guild_id = GUILD_ID
         self.sheet = AccessSheet()
         self.forms = FormsService(self, self.sheet)
@@ -51,15 +51,16 @@ bot = OpsBot()
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} ({bot.user.id})")
+    # `main.py setup` only builds the server; it must not sync roles, write Sheets, or send reachouts.
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "setup":
+        return
     if not hasattr(bot, "_access_sync"):
         bot._access_sync = AccessSync(bot, bot.sheet, GUILD_ID, SYNC_MINUTES)
         bot._access_sync.loop.start()
     if not hasattr(bot, "_forms_sync"):
         bot._forms_sync = FormsSync(bot, bot.forms, FORMS_SYNC_MINUTES)
         bot._forms_sync.loop.start()
-    # `main.py setup` only builds the server; it must not poll or send reachouts.
-    setup_mode = len(sys.argv) > 1 and sys.argv[1].lower() == "setup"
-    if bot.reachouts and not setup_mode and not hasattr(bot, "_reachout_loop"):
+    if bot.reachouts and not hasattr(bot, "_reachout_loop"):
         bot._reachout_loop = ReachoutLoop(bot, bot.reachouts)
         bot._reachout_loop.loop.start()
 
@@ -74,19 +75,6 @@ async def post_setup_message(guild):
         "Welcome.\n\nComplete account verification to receive access to your assigned team channels.",
         view=VerifyView(bot.sheet)
     )
-
-async def setup_only():
-    await bot.login(TOKEN)
-    try:
-        guild = await bot.fetch_guild(GUILD_ID)
-        # fetch_guild is partial; use cache after connect instead via temporary ready event
-    finally:
-        await bot.close()
-
-@bot.event
-async def on_connect():
-    if len(sys.argv) > 1 and sys.argv[1].lower() == "setup":
-        await bot.wait_until_ready()
 
 async def run_setup_when_ready():
     await bot.wait_until_ready()
@@ -118,4 +106,5 @@ if __name__ == "__main__":
                     task.cancel()
         asyncio.run(runner())
     else:
-        bot.run(TOKEN)
+        # basicConfig above already logs; discord.py's own handler would print every line twice.
+        bot.run(TOKEN, log_handler=None)

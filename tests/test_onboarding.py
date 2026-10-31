@@ -206,5 +206,48 @@ class ModalAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(interaction.response.send_modal.call_args.args[0], onboarding.EmailModal)
 
 
+class AccessSyncTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = patch.object(database, "DB_PATH", Path(self.tmp.name) / "opsbot.db")
+        self.db_path.start()
+        database.init_db()
+        for user_id in (1, 2, 3):
+            database.save_verified_user(user_id, f"user{user_id}@example.com")
+
+    def tearDown(self):
+        self.db_path.stop()
+        self.tmp.cleanup()
+
+    def access_sync(self, sheet):
+        from bot.sync import AccessSync
+
+        guild = MagicMock()
+        guild.get_member.side_effect = lambda user_id: MagicMock(id=user_id)
+        bot = MagicMock()
+        bot.get_guild.return_value = guild
+        return AccessSync(bot, sheet, 1, 15)
+
+    async def test_the_roster_is_read_once_per_pass(self):
+        sheet = MagicMock()
+        sheet.all_records.return_value = [{"Email": "User2@example.com", "Active": "TRUE"}]
+        sync = AsyncMock(return_value=([], []))
+        with patch("bot.sync.sync_member_roles", sync):
+            await self.access_sync(sheet).sync_all()
+        sheet.all_records.assert_called_once()
+        sheet.get_by_email.assert_not_called()
+        records = {call.args[0].id: call.args[1] for call in sync.await_args_list}
+        self.assertEqual(records, {1: None, 2: {"Email": "User2@example.com", "Active": "TRUE"}, 3: None})
+
+    async def test_a_failed_roster_read_removes_nobody(self):
+        sheet = MagicMock()
+        sheet.all_records.side_effect = RuntimeError("APIError 503")
+        sync = AsyncMock(return_value=([], []))
+        with patch("bot.sync.sync_member_roles", sync):
+            await self.access_sync(sheet).sync_all()
+        sync.assert_not_awaited()
+        self.assertEqual(database.count_audit_since("SYNC_FAILED", "2000-01-01"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
