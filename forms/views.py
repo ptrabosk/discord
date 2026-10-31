@@ -42,10 +42,31 @@ async def _ephemeral_error(interaction: discord.Interaction, message: str):
         await interaction.response.send_message(message, ephemeral=True)
 
 
+ET_NOTE = "All dates and times are New York / Eastern Time."
+ET_HEADING = "**All dates and times must be entered in New York / Eastern Time.**\n\n"
+
+
 class OwnedView(discord.ui.View):
-    def __init__(self, owner_id: int, *, timeout: float | None = 900):
+    """One private form step. `back` rebuilds the previous step; each step's text is its `prompt`."""
+
+    prompt = ""
+
+    def __init__(self, owner_id: int, *, back=None, timeout: float | None = 900):
         super().__init__(timeout=timeout)
         self.owner_id = owner_id
+        self.back = back
+        if back:
+            # Row 1 keeps Back under the step's select, which fills row 0.
+            button = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary, row=1)
+            button.callback = self.go_back
+            self.add_item(button)
+
+    async def go_back(self, interaction: discord.Interaction):
+        view = self.back()
+        await interaction.response.edit_message(content=view.prompt, view=view)
+
+    async def show(self, interaction: discord.Interaction, view: "OwnedView"):
+        await interaction.response.edit_message(content=view.prompt, view=view)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id:
@@ -81,11 +102,8 @@ async def open_private_form(interaction: discord.Interaction, service):
         )
         return
     audit(interaction.user.id, email, "FORM_STARTED")
-    await interaction.response.send_message(
-        FORM_CONFIG["prompts"]["form_type"],
-        view=TopLevelView(service, interaction.user.id),
-        ephemeral=True,
-    )
+    view = TopLevelView(service, interaction.user.id)
+    await interaction.response.send_message(view.prompt, view=view, ephemeral=True)
 
 
 class FormLauncherView(discord.ui.View):
@@ -113,6 +131,8 @@ class TopLevelView(OwnedView):
     def __init__(self, service, owner_id: int):
         super().__init__(owner_id)
         self.service = service
+        self.prompt = FORM_CONFIG["prompts"]["form_type"]
+        self.again = lambda: TopLevelView(service, owner_id)
         self.add_item(ChoiceSelect(
             [discord.SelectOption(label=FORM_CONFIG["form_names"][key], value=key) for key in MENU_FORMS],
             "Select a form type",
@@ -120,22 +140,18 @@ class TopLevelView(OwnedView):
 
     async def choose(self, interaction, value):
         if value == "when_i_work":
-            await interaction.response.edit_message(
-                content=FORM_CONFIG["prompts"]["when_i_work"],
-                view=WhenIWorkView(self.service, self.owner_id),
-            )
+            await self.show(interaction, WhenIWorkView(self.service, self.owner_id, back=self.again))
             return
         state = FormState(form_type=value)
-        await interaction.response.edit_message(
-            content=FORM_CONFIG["prompts"]["category"],
-            view=CategoryView(self.service, self.owner_id, state),
-        )
+        await self.show(interaction, CategoryView(self.service, self.owner_id, state, back=self.again))
 
 
 class WhenIWorkView(OwnedView):
-    def __init__(self, service, owner_id: int):
-        super().__init__(owner_id)
+    def __init__(self, service, owner_id: int, *, back=None):
+        super().__init__(owner_id, back=back)
         self.service = service
+        self.prompt = FORM_CONFIG["prompts"]["when_i_work"]
+        self.again = lambda: WhenIWorkView(service, owner_id, back=back)
         self.add_item(ChoiceSelect(
             [discord.SelectOption(label=label, value=key)
              for key, label in FORM_CONFIG["when_i_work_names"].items()],
@@ -145,25 +161,18 @@ class WhenIWorkView(OwnedView):
     async def choose(self, interaction, value):
         state = FormState(form_type="when_i_work", form_subtype=value)
         if value == "timesheet_adjustment":
-            await interaction.response.edit_message(
-                content=FORM_CONFIG["prompts"]["adjustment_type"],
-                view=AdjustmentTypeView(self.service, self.owner_id, state),
-            )
-            return
-        await interaction.response.edit_message(
-            content=(
-                "**Enter the scheduled shift date and start time in New York / Eastern Time.**\n\n"
-                f"{FORM_CONFIG['prompts']['start_date_range']}"
-            ),
-            view=DateRangeView(self.service, self.owner_id, state, "start"),
-        )
+            view = AdjustmentTypeView(self.service, self.owner_id, state, back=self.again)
+        else:
+            view = DateRangeView(self.service, self.owner_id, state, "start", back=self.again)
+        await self.show(interaction, view)
 
 
 class CategoryView(OwnedView):
-    def __init__(self, service, owner_id: int, state: FormState):
-        super().__init__(owner_id)
+    def __init__(self, service, owner_id: int, state: FormState, *, back=None):
+        super().__init__(owner_id, back=back)
         self.service = service
         self.state = state
+        self.prompt = FORM_CONFIG["prompts"]["category"]
         self.add_item(ChoiceSelect(
             [discord.SelectOption(label=item, value=item) for item in CATEGORIES],
             "Select a category",
@@ -175,10 +184,12 @@ class CategoryView(OwnedView):
 
 
 class AdjustmentTypeView(OwnedView):
-    def __init__(self, service, owner_id: int, state: FormState):
-        super().__init__(owner_id)
+    def __init__(self, service, owner_id: int, state: FormState, *, back=None):
+        super().__init__(owner_id, back=back)
         self.service = service
         self.state = state
+        self.prompt = FORM_CONFIG["prompts"]["adjustment_type"]
+        self.again = lambda: AdjustmentTypeView(service, owner_id, state, back=back)
         self.add_item(ChoiceSelect(
             [discord.SelectOption(label=item, value=item) for item in ADJUSTMENT_TYPES],
             "Select an adjustment type",
@@ -187,16 +198,10 @@ class AdjustmentTypeView(OwnedView):
     async def choose(self, interaction, value):
         self.state.adjustment_type = value
         today = datetime.now(EASTERN).date()
-        await interaction.response.edit_message(
-            content=(
-                "**All dates and times must be entered in New York / Eastern Time.**\n\n"
-                f"{FORM_CONFIG['prompts']['start_date']}"
-            ),
-            view=DateChoiceView(
-                self.service, self.owner_id, self.state, "start",
-                today - timedelta(days=14), today,
-            ),
-        )
+        await self.show(interaction, DateChoiceView(
+            self.service, self.owner_id, self.state, "start",
+            today - timedelta(days=14), today, back=self.again,
+        ))
 
 
 def _date_limits() -> tuple[date, date]:
@@ -210,11 +215,16 @@ def _date_limits() -> tuple[date, date]:
 
 
 class DateRangeView(OwnedView):
-    def __init__(self, service, owner_id: int, state: FormState, target: str):
-        super().__init__(owner_id)
+    def __init__(self, service, owner_id: int, state: FormState, target: str, *, back=None):
+        super().__init__(owner_id, back=back)
         self.service = service
         self.state = state
         self.target = target
+        self.prompt = (
+            "**Enter the scheduled shift date and start time in New York / Eastern Time.**\n\n"
+            f"{FORM_CONFIG['prompts']['start_date_range']}"
+        )
+        self.again = lambda: DateRangeView(service, owner_id, state, target, back=back)
         first, last = _date_limits()
         ranges = []
         cursor = first
@@ -235,23 +245,23 @@ class DateRangeView(OwnedView):
 
     async def choose(self, interaction, value):
         start, end = self.ranges[int(value)]
-        await interaction.response.edit_message(
-            content=(
-                f"{FORM_CONFIG['prompts'][self.target + '_date']} "
-                "All dates and times are New York / Eastern Time."
-            ),
-            view=DateChoiceView(
-                self.service, self.owner_id, self.state, self.target, start, end
-            ),
-        )
+        await self.show(interaction, DateChoiceView(
+            self.service, self.owner_id, self.state, self.target, start, end, back=self.again,
+        ))
 
 
 class DateChoiceView(OwnedView):
-    def __init__(self, service, owner_id, state, target, first, last):
-        super().__init__(owner_id)
+    def __init__(self, service, owner_id, state, target, first, last, *, back=None):
+        super().__init__(owner_id, back=back)
         self.service = service
         self.state = state
         self.target = target
+        date_prompt = FORM_CONFIG["prompts"][target + "_date"]
+        # Timesheet adjustments reach this step straight from the adjustment type, so it leads with the ET rule.
+        self.prompt = (
+            ET_HEADING + date_prompt if state.form_subtype == "timesheet_adjustment" else f"{date_prompt} {ET_NOTE}"
+        )
+        self.again = lambda: DateChoiceView(service, owner_id, state, target, first, last, back=back)
         options = []
         cursor = first
         while cursor <= last:
@@ -261,21 +271,23 @@ class DateChoiceView(OwnedView):
 
     async def choose(self, interaction, value):
         setattr(self.state, f"{self.target}_date", date.fromisoformat(value))
-        await interaction.response.edit_message(
-            content=(
-                f"{FORM_CONFIG['prompts'][self.target + '_hour']} "
-                "All dates and times are New York / Eastern Time."
-            ),
-            view=HourView(self.service, self.owner_id, self.state, self.target),
-        )
+        await self.show(interaction, HourView(self.service, self.owner_id, self.state, self.target, back=self.again))
 
 
 class HourView(OwnedView):
-    def __init__(self, service, owner_id, state, target):
-        super().__init__(owner_id)
+    def __init__(self, service, owner_id, state, target, *, back=None):
+        super().__init__(owner_id, back=back)
         self.service = service
         self.state = state
         self.target = target
+        if target == "end":
+            self.prompt = (
+                f"{ET_HEADING}{FORM_CONFIG['prompts']['end_hour']}\n"
+                "The end date is the same as the selected start date."
+            )
+        else:
+            self.prompt = f"{FORM_CONFIG['prompts'][target + '_hour']} {ET_NOTE}"
+        self.again = lambda: HourView(service, owner_id, state, target, back=back)
         options = []
         for hour in START_HOURS if target == "start" else range(24):
             label_hour = hour % 12 or 12
@@ -289,32 +301,20 @@ class HourView(OwnedView):
         if self.target == "start":
             self.state.start_minute = 0
             if self.state.form_subtype == "timesheet_adjustment":
-                await interaction.response.edit_message(
-                    content=(
-                        "**All dates and times must be entered in New York / Eastern Time.**\n\n"
-                        f"{FORM_CONFIG['prompts']['end_hour']}\n"
-                        "The end date is the same as the selected start date."
-                    ),
-                    view=HourView(self.service, self.owner_id, self.state, "end"),
-                )
+                await self.show(interaction, HourView(self.service, self.owner_id, self.state, "end", back=self.again))
                 return
             await interaction.response.send_modal(MessageModal(self.service, self.state))
             return
-        await interaction.response.edit_message(
-            content=(
-                f"{FORM_CONFIG['prompts'][self.target + '_minute']} "
-                "All dates and times are New York / Eastern Time."
-            ),
-            view=MinuteView(self.service, self.owner_id, self.state, self.target),
-        )
+        await self.show(interaction, MinuteView(self.service, self.owner_id, self.state, self.target, back=self.again))
 
 
 class MinuteView(OwnedView):
-    def __init__(self, service, owner_id, state, target):
-        super().__init__(owner_id)
+    def __init__(self, service, owner_id, state, target, *, back=None):
+        super().__init__(owner_id, back=back)
         self.service = service
         self.state = state
         self.target = target
+        self.prompt = f"{FORM_CONFIG['prompts'][target + '_minute']} {ET_NOTE}"
         self.add_item(ChoiceSelect([
             discord.SelectOption(label=f":{minute:02d}", value=str(minute))
             for minute in (0, 15, 30, 45)
@@ -343,14 +343,16 @@ class MessageModal(discord.ui.Modal):
         self.add_item(self.message_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        # A deferred update of the step message: on success it becomes the confirmation with no
+        # controls, so the form cannot be submitted twice; on a rejected choice it keeps its Back button.
+        await interaction.response.defer()
         try:
             row = await self.service.submit(interaction, self.state, str(self.message_input))
         except PermissionError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
         except ValueError as exc:
-            await interaction.followup.send(f"Form validation failed: {exc}", ephemeral=True)
+            await interaction.followup.send(f"Form validation failed: {exc} Use Back to change it.", ephemeral=True)
             return
         except Exception as exc:
             log.exception("Could not persist form submission")
@@ -364,7 +366,7 @@ class MessageModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
-        await interaction.followup.send(_confirmation(row), ephemeral=True)
+        await interaction.edit_original_response(content=_confirmation(row), view=None)
 
 
 def _confirmation(row: dict) -> str:

@@ -4,7 +4,7 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import discord
@@ -1289,6 +1289,28 @@ class TemplateSetupTests(unittest.TestCase):
         sheet.setup("bot@project.iam.gserviceaccount.com")
         self.assertEqual(spreadsheet.sheets[QUEUE_TAB].rows[0], TAB_HEADERS[QUEUE_TAB])
         self.assertEqual(spreadsheet.sheets["My notes"].rows, [["keep"]])
+
+
+class SnoozeViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_back_closes_the_picker_without_snoozing(self):
+        from reachouts.views import SnoozeView
+
+        view = SnoozeView("NDG-20261031-0000000A", owner_id=LEAD_ID)
+        back = next(item for item in view.children if isinstance(item, discord.ui.Button))
+        self.assertEqual(back.label, "Back")
+        edit = AsyncMock()
+        interaction = SimpleNamespace(user=SimpleNamespace(id=LEAD_ID), response=SimpleNamespace(edit_message=edit))
+        self.assertTrue(await view.interaction_check(interaction))
+        await back.callback(interaction)
+        edit.assert_awaited_once_with(content="Snooze cancelled. Nothing changed.", view=None)
+
+    async def test_only_the_lead_who_opened_it_can_use_it(self):
+        from reachouts.views import SnoozeView
+
+        send = AsyncMock()
+        stranger = SimpleNamespace(user=SimpleNamespace(id=AGENT_ID), response=SimpleNamespace(send_message=send))
+        self.assertFalse(await SnoozeView("NDG-20261031-0000000A", owner_id=LEAD_ID).interaction_check(stranger))
+        send.assert_awaited_once()
 
 
 if __name__ == "__main__":

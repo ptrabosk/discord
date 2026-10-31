@@ -162,6 +162,49 @@ class ModalAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.send_message.assert_not_called()
         self.assertIsNotNone(database.get_verified_user(42))
 
+    async def test_a_failed_email_send_is_reported_and_frees_the_resend_cooldown(self):
+        from bot import onboarding
+
+        calls = []
+        sheet = MagicMock()
+        sheet.get_by_email.return_value = {"Active": "TRUE"}
+        modal = onboarding.EmailModal(sheet)
+        modal.email = EMAIL
+        interaction = self.interaction(calls)
+        with patch.object(onboarding, "_allowed", return_value=True), \
+                patch.object(onboarding, "send_verification_email", side_effect=OSError("smtp down")):
+            await modal.on_submit(interaction)
+
+        self.assertIn("couldn't send the email", interaction.followup.send.call_args.args[0])
+        self.assertIsNone(database.get_code(42))
+        self.assertIsNone(code_request_blocked(42, EMAIL))
+
+    async def test_a_role_failure_after_verifying_still_answers_the_user(self):
+        from bot import onboarding
+
+        calls = []
+        database.save_code(42, EMAIL, onboarding._hash("123456"), "2099-01-01T00:00:00+00:00")
+        sheet = MagicMock()
+        sheet.get_by_email.return_value = {"Active": "TRUE"}
+        modal = onboarding.CodeModal(sheet)
+        modal.code = "123456"
+        interaction = self.interaction(calls)
+        with patch.object(onboarding, "sync_member_roles", AsyncMock(side_effect=RuntimeError("Forbidden"))):
+            await modal.on_submit(interaction)
+
+        self.assertIn("could not be applied yet", interaction.followup.send.call_args.args[0])
+        self.assertIsNotNone(database.get_verified_user(42))
+
+    async def test_the_code_step_offers_a_different_email(self):
+        from bot import onboarding
+
+        view = onboarding.CodeView(MagicMock())
+        self.assertEqual([item.label for item in view.children], ["Enter Verification Code", "Use a different email"])
+        interaction = MagicMock()
+        interaction.response.send_modal = AsyncMock()
+        await view.children[1].callback(interaction)
+        self.assertIsInstance(interaction.response.send_modal.call_args.args[0], onboarding.EmailModal)
+
 
 if __name__ == "__main__":
     unittest.main()

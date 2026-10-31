@@ -511,11 +511,21 @@ class SnoozeView(discord.ui.View):
         )
         select.callback = self.choose
         self.add_item(select)
+        back = discord.ui.Button(label="Back", style=discord.ButtonStyle.secondary, row=1)
+        back.callback = self.cancel
+        self.add_item(back)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message("This control belongs to another user.", ephemeral=True)
+        return False
+
+    async def cancel(self, interaction: discord.Interaction):
+        """Back out of snoozing; the nudge's buttons stay usable."""
+        await interaction.response.edit_message(content="Snooze cancelled. Nothing changed.", view=None)
 
     async def choose(self, interaction: discord.Interaction):
-        if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("This control belongs to another user.", ephemeral=True)
-            return
         option = interaction.data["values"][0]
 
         async def run():

@@ -7,9 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import discord
+
 from database.forms_repository import FormsRepository
 from forms.domain import (
     FormState,
+    CATEGORIES,
     EASTERN,
     FORM_CONFIG,
     START_HOURS,
@@ -22,7 +25,10 @@ from forms.domain import (
     validate_category,
 )
 from integrations.forms_sheets import HEADERS, sheet_values
-from forms.views import AdjustmentTypeView, HourView, MessageModal, MinuteView, TopLevelView, _confirmation, register_forms
+from forms.views import (
+    AdjustmentTypeView, CategoryView, DateChoiceView, DateRangeView, HourView, MessageModal, MinuteView,
+    TopLevelView, WhenIWorkView, _confirmation, register_forms,
+)
 from forms.service import DEFAULT_FORM_ERROR_CHANNEL_ID, FormsService
 
 
@@ -46,6 +52,10 @@ def submission_values(interaction_id: str, form_type="question", form_subtype=No
         "end_time_utc": None,
         "message": "Test message",
     }
+
+
+def select_of(view):
+    return next(item for item in view.children if isinstance(item, discord.ui.Select))
 
 
 class DatetimeTests(unittest.TestCase):
@@ -100,7 +110,7 @@ class DatetimeTests(unittest.TestCase):
 
 class ValidationTests(unittest.TestCase):
     def test_menu_offers_when_i_work_and_one_combined_qs_and_feedback_form(self):
-        options = TopLevelView(None, 1).children[0].options
+        options = select_of(TopLevelView(None, 1)).options
         self.assertEqual([(o.label, o.value) for o in options], [("When I Work", "when_i_work"), ("Qs & Feedback", "question")])
         modal = MessageModal(None, FormState(form_type="question", category="Pay"))
         self.assertEqual(modal.title, "Qs & Feedback")
@@ -268,7 +278,7 @@ class FormDateSelectionTests(unittest.IsolatedAsyncioTestCase):
         interaction = SimpleNamespace(response=response)
         view = AdjustmentTypeView(None, 123, FormState("when_i_work", "timesheet_adjustment"))
         await view.choose(interaction, FORM_CONFIG["adjustment_types"][0])
-        options = response.view.children[0].options
+        options = select_of(response.view).options
         today = datetime.now(EASTERN).date()
         self.assertEqual(len(options), 15)
         self.assertEqual(options[0].value, (today - timedelta(days=14)).isoformat())
@@ -288,7 +298,7 @@ class FormDateSelectionTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(subtype=subtype):
                 state = FormState("when_i_work", subtype, start_date=date(2026, 9, 19))
                 view = HourView(None, 123, state, "start")
-                options = view.children[0].options
+                options = select_of(view).options
                 self.assertEqual([option.label for option in options], expected)
                 self.assertEqual([option.value for option in options], [str(hour) for hour in START_HOURS])
                 response = Response()
@@ -297,15 +307,12 @@ class FormDateSelectionTests(unittest.IsolatedAsyncioTestCase):
                 if subtype == "timesheet_adjustment":
                     self.assertIsInstance(response.view, HourView)
                     self.assertEqual(response.view.target, "end")
-                    self.assertEqual(len(response.view.children[0].options), 24)
+                    self.assertEqual(len(select_of(response.view).options), 24)
                     await response.view.choose(SimpleNamespace(response=response), "16")
                     self.assertIsInstance(response.view, MinuteView)
                 else:
                     self.assertIsInstance(response.modal, MessageModal)
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class SubmitTests(unittest.IsolatedAsyncioTestCase):
@@ -493,3 +500,105 @@ class ConnectionTests(unittest.TestCase):
                 con.execute("SELECT 1")  # closed
             row, _ = repository.create(submission_values("closing"))
             self.assertEqual(repository.get(row["submission_id"])["interaction_id"], "closing")
+
+
+class Screen:
+    """A fake ephemeral form message: edits replace its content and view; modals are recorded."""
+
+    def __init__(self):
+        self.content = self.view = self.modal = None
+
+    async def edit_message(self, **kwargs):
+        self.content, self.view = kwargs["content"], kwargs["view"]
+
+    async def send_modal(self, modal):
+        self.modal = modal
+
+
+def back_button(view):
+    return next((item for item in view.children if isinstance(item, discord.ui.Button) and item.label == "Back"), None)
+
+
+class BackButtonTests(unittest.IsolatedAsyncioTestCase):
+    async def walk(self, picks):
+        """Pick through the form from the top; return the screen and every step shown, with its prompt."""
+        screen = Screen()
+        screen.view = TopLevelView(None, 123)
+        screen.content = screen.view.prompt
+        steps = [(type(screen.view), screen.content)]
+        for value in picks:
+            await screen.view.choose(SimpleNamespace(response=screen), value)
+            steps.append((type(screen.view), screen.content))
+        return screen, steps
+
+    async def assert_back_retraces(self, picks, expected):
+        screen, steps = await self.walk(picks)
+        self.assertEqual([step for step, _ in steps], expected)
+        self.assertIsNone(back_button(TopLevelView(None, 123)))
+        for previous_type, previous_prompt in reversed(steps[:-1]):
+            button = back_button(screen.view)
+            self.assertIsNotNone(button, f"{type(screen.view).__name__} has no Back button")
+            await button.callback(SimpleNamespace(response=screen))
+            self.assertIsInstance(screen.view, previous_type)
+            self.assertEqual(screen.content, previous_prompt)
+        self.assertIsInstance(screen.view, TopLevelView)
+
+    async def test_back_retraces_every_timesheet_adjustment_step(self):
+        today = datetime.now(EASTERN).date().isoformat()
+        await self.assert_back_retraces(
+            ["when_i_work", "timesheet_adjustment", FORM_CONFIG["adjustment_types"][0], today, "14", "16"],
+            [TopLevelView, WhenIWorkView, AdjustmentTypeView, DateChoiceView, HourView, HourView, MinuteView],
+        )
+
+    async def test_back_retraces_every_emergency_release_step(self):
+        today = datetime.now(EASTERN).date().isoformat()
+        await self.assert_back_retraces(
+            ["when_i_work", "emergency_shift_release", "0", today],
+            [TopLevelView, WhenIWorkView, DateRangeView, DateChoiceView, HourView],
+        )
+
+    async def test_back_from_the_category_returns_to_the_form_types(self):
+        await self.assert_back_retraces(["question"], [TopLevelView, CategoryView])
+
+    async def test_a_dismissed_modal_can_be_reopened_after_going_back(self):
+        screen, _ = await self.walk(["question", CATEGORIES[0]])
+        self.assertIsInstance(screen.modal, MessageModal)
+        screen.modal = None
+        await back_button(screen.view).callback(SimpleNamespace(response=screen))
+        await screen.view.choose(SimpleNamespace(response=screen), "question")
+        await screen.view.choose(SimpleNamespace(response=screen), CATEGORIES[0])
+        self.assertIsInstance(screen.modal, MessageModal)
+
+
+class ModalSubmitTests(unittest.IsolatedAsyncioTestCase):
+    def interaction(self):
+        return SimpleNamespace(
+            id=1,
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+    async def test_success_replaces_the_step_message_so_it_cannot_be_submitted_again(self):
+        row = {"submission_id": "Q-20260919-0001", "form_type": "question", "form_subtype": None}
+        service = SimpleNamespace(submit=AsyncMock(return_value=row))
+        modal = MessageModal(service, FormState(form_type="question", category=CATEGORIES[0]))
+        interaction = self.interaction()
+        await modal.on_submit(interaction)
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.edit_original_response.assert_awaited_once_with(content=_confirmation(row), view=None)
+        interaction.followup.send.assert_not_awaited()
+
+    async def test_a_rejected_choice_keeps_the_step_and_its_back_button(self):
+        service = SimpleNamespace(submit=AsyncMock(side_effect=ValueError("End time must be after start time.")))
+        modal = MessageModal(service, FormState("when_i_work", "timesheet_adjustment"))
+        interaction = self.interaction()
+        await modal.on_submit(interaction)
+        interaction.edit_original_response.assert_not_awaited()
+        message = interaction.followup.send.await_args.args[0]
+        self.assertIn("End time must be after start time.", message)
+        self.assertIn("Back", message)
+
+
+if __name__ == "__main__":
+    unittest.main()

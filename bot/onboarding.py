@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os, re, secrets, hashlib, hmac
 from datetime import datetime, timedelta, timezone
 import discord
@@ -10,12 +11,20 @@ from integrations.email_verification import send_verification_email
 from integrations.google_sheets import truthy
 from bot.permissions import sync_member_roles
 
+log = logging.getLogger(__name__)
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # Per Discord user and per email, over 24 hours. A new code resets the per-code attempt
 # count, so these caps are what bound the total number of guesses against one address.
 DAILY_CODES = 5
 DAILY_FAILED_GUESSES = 10
 THROTTLED = "Too many verification attempts. Try again later or contact Operations."
+TRY_AGAIN = "Verification could not continue because of a technical problem. Please try again in a few minutes."
+
+async def _reply(interaction, message):
+    if interaction.response.is_done():
+        await interaction.followup.send(message, ephemeral=True)
+    else:
+        await interaction.response.send_message(message, ephemeral=True)
 
 def _day_ago():
     return (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
@@ -94,12 +103,26 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
             minutes=int(os.getenv("VERIFICATION_EXPIRY_MINUTES","10"))
         )).isoformat()
         save_code(interaction.user.id, email, _hash(code), expiry)
-        await asyncio.to_thread(send_verification_email, email, code)
+        try:
+            await asyncio.to_thread(send_verification_email, email, code)
+        except Exception as exc:
+            # Without the email the saved code is useless, and it would hold the resend cooldown.
+            delete_code(interaction.user.id)
+            log.exception("Could not send the verification email")
+            audit(interaction.user.id, email, "VERIFICATION_EMAIL_FAILED", type(exc).__name__)
+            await interaction.followup.send(
+                "We couldn't send the email right now. Please try again in a few minutes.", ephemeral=True
+            )
+            return
         audit(interaction.user.id, email, "VERIFICATION_SENT")
         await interaction.followup.send(
             f"Verification email sent to {_mask(email)}.",
             view=CodeView(self.sheet), ephemeral=True
         )
+
+    async def on_error(self, interaction, error):
+        log.exception("Verification email step failed", exc_info=error)
+        await _reply(interaction, TRY_AGAIN)
 
 class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
     code = discord.ui.TextInput(label="Verification code", min_length=6, max_length=6)
@@ -143,9 +166,24 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
 
         save_verified_user(interaction.user.id, email)
         delete_code(interaction.user.id)
-        added, removed = await sync_member_roles(interaction.user, record)
+        try:
+            added, removed = await sync_member_roles(interaction.user, record)
+        except Exception as exc:
+            # The user stays verified; the periodic access sync retries the roles.
+            log.exception("Could not apply roles after verification")
+            audit(interaction.user.id, email, "USER_VERIFIED", "Roles not applied")
+            audit(interaction.user.id, email, "ROLE_SYNC_FAILED", repr(exc)[:300])
+            await interaction.followup.send(
+                "Verified, but your access could not be applied yet. It will be retried automatically; "
+                "contact Operations if it does not appear within 30 minutes.", ephemeral=True
+            )
+            return
         audit(interaction.user.id, email, "USER_VERIFIED", f"Added={added}; Removed={removed}")
         await interaction.followup.send("Verified. Your authorized access has been applied.", ephemeral=True)
+
+    async def on_error(self, interaction, error):
+        log.exception("Verification code step failed", exc_info=error)
+        await _reply(interaction, TRY_AGAIN)
 
 class CodeView(discord.ui.View):
     def __init__(self, sheet):
@@ -155,6 +193,11 @@ class CodeView(discord.ui.View):
     @discord.ui.button(label="Enter Verification Code", style=discord.ButtonStyle.primary)
     async def enter_code(self, interaction, button):
         await interaction.response.send_modal(CodeModal(self.sheet))
+
+    @discord.ui.button(label="Use a different email", style=discord.ButtonStyle.secondary)
+    async def change_email(self, interaction, button):
+        # The resend cooldown and daily caps still apply to the new address.
+        await interaction.response.send_modal(EmailModal(self.sheet))
 
 class VerifyView(discord.ui.View):
     def __init__(self, sheet):

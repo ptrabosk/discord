@@ -10,7 +10,7 @@ def send_verification_email(recipient, code):
     msg["To"] = recipient
     msg.set_content(
         f"Your Discord verification code is:\n\n{code}\n\n"
-        "This code expires in 10 minutes.\n\n"
+        f"This code expires in {os.getenv('VERIFICATION_EXPIRY_MINUTES', '10')} minutes.\n\n"
         "If you did not request this code, you can ignore this email."
     )
     host = os.environ["SMTP_HOST"]

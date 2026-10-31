@@ -77,6 +77,8 @@ Share the access-roster Sheet with the service-account email from `credentials.j
 
 Verified agents start Timesheet Adjustments, Emergency Shift Releases, and Qs & Feedback
 with `/workflow`. All agent prompts and confirmations are private/ephemeral;
+every step after the first has a **Back** button, and a submitted form's message becomes its
+confirmation with no controls left, so it cannot be submitted twice;
 no public launcher message is needed. Previously posted `Submit a Form` buttons still work, but the
 bot no longer posts new ones. Submissions still post review cards to configured private reviewer
 channels. Identity comes from the verified-user database and the `Name`/`Email` fields in the
