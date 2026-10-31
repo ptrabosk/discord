@@ -22,8 +22,8 @@ performance cards have no footer.
    (`YYYY-MM-DD HH:MM` in the Config timezone).
 2. Finish editing. What is in the row when it is sent is exactly what the agent sees.
 3. Tick `send`. Tick as many rows as you want to send together.
-4. Run `/reachout_poll` in Discord. Ticked rows are sent only then; the bot's automatic check never
-   sends. Each row's `processing_status` becomes `SENT`.
+4. Run `/reachout_poll` in Discord. Ticked rows are sent only then; the bot never reads the sheet
+   on its own. Each row's `processing_status` becomes `SENT`.
 5. Delete `SENT` rows whenever you like. Everything about them, including every reply, is in
    **Reachout History**.
 
@@ -49,7 +49,7 @@ what needs attention.
 
 ### Reassigning a lead
 
-Change the agent's `Team Lead Email` in `Discord Access` (the new lead must have completed Verify Work Email). Within `REACHOUT_ROSTER_REFRESH_MINUTES` (default 5) plus one poll:
+Change the agent's `Team Lead Email` in `Discord Access` (the new lead must have completed Verify Work Email). Then run `/reachout_poll`. On that poll:
 
 - The new lead gets access to the agent's channel and the old lead's access is removed.
 - The old lead's buttons stop working ("You are not the currently assigned team lead").

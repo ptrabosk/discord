@@ -26,7 +26,7 @@ from reachouts.domain import (
     validate_row,
 )
 from reachouts.repository import ReachoutRepository, StaleForm, WorkflowError
-from reachouts.service import ReachoutService, Settings
+from reachouts.service import ReachoutLoop, ReachoutService, Settings
 from reachouts.sheets import AGENTS_TAB, HISTORY_TAB, QUEUE_TAB, RESPONSES_TAB, TAB_HEADERS, Table
 
 NY = ZoneInfo("America/New_York")
@@ -356,7 +356,7 @@ class WorkflowBase(unittest.IsolatedAsyncioTestCase):
         self.repo = ReachoutRepository(Path(tmp.name) / "opsbot.db")
         self.sheet = FakeSheet()
         self.bot = FakeBot()
-        self.settings = Settings(sheet_id="x", poll_seconds=60, batch=10, full_reconcile_minutes=60, roster_minutes=5,
+        self.settings = Settings(sheet_id="x", poll_seconds=60, batch=10,
                                  category_id=0, test_mode=False, test_allowed=frozenset(), error_channel_id=0)
         self.roster = [{"Email": "agent@example.com", "First Name": "Agent", "Last Name": "One", "Active": "TRUE",
                         "Team Lead Email": "lead@example.com"}]
@@ -820,6 +820,35 @@ class NudgeTests(WorkflowBase):
         self.assertIsNone(self.repo.one("SELECT * FROM reachout_nudges WHERE reachout_id=?", (rid,)))
         self.assertEqual(self.repo.open_obligation(rid)["reminder_count"], 1)
 
+    async def test_the_automatic_pass_reminds_and_retries_without_touching_sheets(self):
+        _, rid = await self.deliver()
+
+        class NoSheet:
+            def __getattr__(self, name):
+                raise AssertionError(f"the automatic pass called Sheets {name}")
+
+        self.service.sheet = NoSheet()
+        self.service.access_sheet = NoSheet()
+        later = utcnow() + timedelta(days=7, minutes=1)
+        with patch("reachouts.service.utcnow", return_value=later), \
+                patch("reachouts.repository.utcnow", return_value=later):
+            self.assertEqual(await self.service.background_tick(), 1)
+        self.assertEqual(self.thread(rid).sent[0].kwargs["embed"].title, "Reminder")
+        self.assertEqual(self.alerts, [])  # a swallowed Sheets call would show up as an alert
+
+    async def test_the_loop_runs_only_the_automatic_pass(self):
+        calls = []
+
+        async def background_tick():
+            calls.append("background")
+
+        async def tick(*args, **kwargs):
+            calls.append("poll")
+
+        self.service.background_tick, self.service.tick = background_tick, tick
+        await ReachoutLoop.loop.coro(ReachoutLoop(self.bot, self.service))
+        self.assertEqual(calls, ["background"])
+
     async def test_no_automatic_reminder_after_the_agent_responds(self):
         _, rid = await self.deliver()
         await self.submit(rid)
@@ -878,7 +907,6 @@ class NudgeTests(WorkflowBase):
     async def test_lead_reassignment_revokes_old_controls_and_reroutes_work(self):
         rid, nudge = await self.overdue()
         self.roster[0]["Team Lead Email"] = "newlead@example.com"
-        self.service._roster_at = None  # the roster is re-read on its next refresh
         await self.poll()
         with self.assertRaises(PermissionError):
             await self.service.remind(Interaction.make(LEAD_ID), nudge["nudge_id"], None)

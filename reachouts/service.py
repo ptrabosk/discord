@@ -1,4 +1,4 @@
-"""Reachout workflow: Sheets polling, Discord delivery, team-lead DMs, and overdue nudges.
+"""Reachout workflow: the manual Sheets poll, Discord delivery, team-lead DMs, and overdue nudges.
 
 SQLite is authoritative for workflow state; Sheets is authoritative for operator input and is
 otherwise a mirror. Discord side effects run as durable jobs (see ReachoutRepository._job).
@@ -121,8 +121,6 @@ class Settings:
     sheet_id: str
     poll_seconds: int
     batch: int
-    full_reconcile_minutes: int
-    roster_minutes: int
     category_id: int
     test_mode: bool
     test_allowed: frozenset[int]
@@ -137,8 +135,6 @@ class Settings:
             sheet_id=os.getenv("REACHOUT_SHEET_ID", "").strip(),
             poll_seconds=max(30, _int_env("REACHOUT_POLL_SECONDS", 60)),
             batch=max(1, min(_int_env("REACHOUT_BATCH_SIZE", 10), 50)),
-            full_reconcile_minutes=max(10, _int_env("REACHOUT_FULL_RECONCILE_MINUTES", 60)),
-            roster_minutes=max(1, _int_env("REACHOUT_ROSTER_REFRESH_MINUTES", 5)),
             category_id=_int_env("REACHOUT_CHANNEL_CATEGORY_ID", 0),
             # Test mode is on unless explicitly turned off, and only in .env: a Sheets editor cannot disable it.
             test_mode=os.getenv("REACHOUT_TEST_MODE", "true").strip().lower() not in {"false", "0", "no", "off"},
@@ -167,9 +163,6 @@ class ReachoutService:
         self._poll_lock = asyncio.Lock()
         self._jobs_lock = asyncio.Lock()
         self._jobs_again = False
-        self._roster: dict = {}
-        self._roster_at: datetime | None = None
-        self._last_full: datetime | None = None
         self._history_written: dict[str, dict] = {}  # last History row written per reachout
         self._alerted: dict[str, datetime] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -262,31 +255,33 @@ class ReachoutService:
 
     # --- polling -----------------------------------------------------------------------
 
-    async def tick(self, full: bool | None = None, *, send: bool = False) -> dict:
-        """One scheduler pass. Sheets trouble never stops Discord jobs or nudges, or the reverse.
+    async def tick(self, full: bool = True, *, send: bool = True) -> dict:
+        """What /reachout_poll runs: the only Sheets read and write, then nudges and jobs.
 
-        Ticked queue rows are released only when send is set, which /reachout_poll does.
+        Sheets trouble never stops Discord jobs or nudges, or the reverse.
         """
         now = utcnow()
-        if full is None:
-            full = self._last_full is None or now - self._last_full >= timedelta(minutes=self.settings.full_reconcile_minutes)
         stats: dict = {}
         try:
             stats = await self.poll_once(full=full, send=send)
-            if full:
-                self._last_full = now
         except Exception as exc:
             log.exception("Reachout Sheets poll failed")
             self.repo.kv_set("last_poll_error", f"{iso(now)} {type(exc).__name__}: {exc}"[:1000])
             await self.alert("sheets_poll_failed", type(exc).__name__, exc)
             stats["poll_error"] = f"{type(exc).__name__}: {exc}"[:300]
+        stats["nudges_queued"] = await self.background_tick()
+        return stats
+
+    async def background_tick(self) -> int | None:
+        """The automatic pass: overdue reminders and Discord job retries. It never touches Sheets."""
+        queued = None
         try:
-            stats["nudges_queued"] = self.schedule_nudges(utcnow())
+            queued = self.schedule_nudges(utcnow())
         except Exception as exc:
             log.exception("Reachout nudge scheduling failed")
             await self.alert("nudge_scheduling_failed", "scheduler", exc)
         await self.run_jobs()
-        return stats
+        return queued
 
     async def poll_once(self, *, full: bool = False, send: bool = False) -> dict:
         async with self._poll_lock:
@@ -328,15 +323,13 @@ class ReachoutService:
                 updates += self.diff(config_table, row_number, row, {"bot_status": key_status.get(key, "")})
         return updates
 
-    async def roster(self, now: datetime) -> dict:
-        if self._roster_at is None or now - self._roster_at >= timedelta(minutes=self.settings.roster_minutes):
-            records = await asyncio.to_thread(self.access_sheet.all_records)
-            self._roster = {str(r.get("Email", "")).strip().lower(): r for r in records}
-            self._roster_at = now
-        return self._roster
+    async def roster(self) -> dict:
+        """The Discord Access roster by email, read fresh on every /reachout_poll."""
+        records = await asyncio.to_thread(self.access_sheet.all_records)
+        return {str(r.get("Email", "")).strip().lower(): r for r in records}
 
     async def sync_directory(self, table, now: datetime) -> list:
-        roster = await self.roster(now)
+        roster = await self.roster()
         counts = Counter(directory_key(row) for _, row in table.rows)
         guild = self.guild()
         updates, present = [], set()
@@ -1264,7 +1257,7 @@ class ReachoutLoop:
     @tasks.loop(seconds=60)
     async def loop(self):
         try:
-            await self.service.tick()
+            await self.service.background_tick()
         except Exception as exc:
             log.exception("Reachout loop failed")
             await self.service.alert("reachout_loop_failed", "loop", exc)

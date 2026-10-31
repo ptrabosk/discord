@@ -8,10 +8,8 @@
 | `REACHOUT_CHANNEL_CATEGORY_ID` | blank | Category where `reachout-<first name>` channels are created. Use a private category; in test mode, a test category. |
 | `REACHOUT_TEST_MODE` | `true` | Anything other than `false`/`0`/`no`/`off` keeps test mode on. |
 | `REACHOUT_TEST_ALLOWED_USER_IDS` | blank | Comma-separated verified work emails and/or Discord user IDs. In test mode only reachouts whose agent **and** lead are both listed are sent, and only listed leads receive DMs. |
-| `REACHOUT_POLL_SECONDS` | `60` (minimum 30) | Scheduler tick: Sheets poll, nudge check, job run. |
+| `REACHOUT_POLL_SECONDS` | `60` (minimum 30) | Background pass: overdue reminders and Discord job retries. Never touches Sheets; only `/reachout_poll` does. |
 | `REACHOUT_BATCH_SIZE` | `10` (1–50) | Jobs per claim. `/reachout_poll` sends every ticked row regardless. |
-| `REACHOUT_FULL_RECONCILE_MINUTES` | `60` (minimum 10) | Full comparison of record tabs with SQLite. |
-| `REACHOUT_ROSTER_REFRESH_MINUTES` | `5` | How often the `Discord Access` roster is re-read. |
 | `REACHOUT_ERROR_CHANNEL_ID` | `FORM_ERROR_CHANNEL_ID` | Private channel for technical alerts (kind and reference only). The bot refuses to use a channel visible to `@everyone`. |
 
 Existing variables are reused: `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`,
@@ -49,8 +47,10 @@ sudo -u offsightbot cp /opt/offsight-bot/data/opsbot.db /opt/offsight-bot/backup
 ## 4. Worker and scheduler
 
 Nothing new to install. The reachout loop runs inside `offsight-bot.service` (`ReachoutLoop`, every
-`REACHOUT_POLL_SECONDS`). Deadlines and nudges are stored in SQLite, so a stopped bot catches up on
-the first tick after restart. Overdue items get their single nudge then, and pending jobs resume.
+`REACHOUT_POLL_SECONDS`) and only sends overdue reminders and retries Discord jobs; it never reads or
+writes Sheets. Deadlines and nudges are stored in SQLite, so a stopped bot catches up on the first
+pass after restart: overdue items get their single nudge then, and pending jobs resume. Run
+`/reachout_poll` after a restart to bring Sheets up to date.
 The service's existing `flock` keeps it to one instance, which the delivery guarantees rely on.
 
 ## 5. Test mode and staged rollout
@@ -97,7 +97,7 @@ Verify:
 |---|---|
 | Sheets looks wrong or a bot column was edited | `/reachout_poll` runs a full reconcile: every queue row's bot cells and every record row are compared with SQLite and rewritten. |
 | Jobs failed permanently (`FAILED`, alerted), e.g. lead DMs closed with no fallback | Fix the cause (lead enables DMs, or set a valid `fallback_channel_id`), then run `/reachout_retry_failed`. |
-| Bot was down | Start it. Due nudges and pending jobs run on the first tick. |
+| Bot was down | Start it. Due nudges and pending jobs run on the first background pass; run `/reachout_poll` to refresh Sheets. |
 | Crash during a send | Automatic. The next attempt searches recent channel history for the record ID before re-posting (see the overview's limits). |
 | A reachout's Discord message, thread, or channel was deleted | Threads are recreated automatically. A deleted message or channel is permanent for that reachout: data stays in SQLite and Sheets. Issue a new reachout if needed. The agent's next reachout recreates their channel. |
 | A queue row was deleted | Add a row containing only the `reachout_id`. The bot refills the bot columns. |
@@ -135,6 +135,6 @@ SELECT reachout_id, dispatch_state, workflow_status, status_detail FROM reachout
 | `lead_notify_status` = `FAILED`, "fallback channel rejected" | The fallback channel is visible to others. Restrict it. |
 | `Reachout Sheets poll failed` alerts, `SheetSchemaError` | A tab or header is missing or renamed. Run `reachout-sheet-setup`. |
 | Poll failed with `APIError` 403 | The spreadsheet is not shared with the service account as Editor. |
-| Poll failed with `APIError` 429 | The Google quota was exceeded. The bot retries next tick. Raise `REACHOUT_POLL_SECONDS` if it persists. |
+| Poll failed with `APIError` 429 | The Google quota was exceeded. Wait a minute and run `/reachout_poll` again. |
 | Discord IDs show as `1.23457E+17` | The column was not plain text. Format it as plain text (Format → Number → Plain text) and re-enter the ID. |
 | A form will not open ("This interaction failed") | The bot is down, or the feature is disabled. Old forms opened before a restart must be reopened. |

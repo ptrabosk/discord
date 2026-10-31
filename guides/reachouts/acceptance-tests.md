@@ -18,7 +18,7 @@ on.
 | # | Setup | Action | Expected | Automated |
 |---|---|---|---|---|
 | 1 | Template created | Inspect the eight sample rows | All unticked for `example.agent@example.invalid`. Ticking one and running `/reachout_poll` gives `ERROR` "…can never be sent". | `TemplateSetupTests`, `test_draft_rows_never_get_an_id_or_send` |
-| 2 | — | Add a full Agent behaviors row for `TEST-A`, tick `send`, wait two automatic polls | No ID, nothing posted | `test_ticked_rows_wait_for_reachout_poll` |
+| 2 | — | Add a full Agent behaviors row for `TEST-A`, tick `send`, wait two minutes without running `/reachout_poll` | No ID, nothing posted | `test_ticked_rows_wait_for_reachout_poll` |
 | 3 | Row from 2 | Run `/reachout_poll` | One post in `reachout-<A's first name>` mentioning A, with a thread; the card shows only title, message and footer. `processing_status` `SENT`. Reachout History gets a row, due 7 days later. | `test_ready_row_sends_once…`, `HistoryTests` |
 | 4 | Sent row | Sort the sheet, insert a row above it, and edit the title | No new post. Same `reachout_id`, still `SENT`. | yes |
 | 5 | — | Ticked row missing `title`; ticked row with `reachout_type` "Coaching"; `/reachout_poll` | `ERROR` with an exact message; nothing posted | `test_invalid_duplicate_and_unknown_rows_never_post`, `test_actionable_errors` |
@@ -38,7 +38,7 @@ on.
 | 19 | Lead DM | L clicks **Reply**, writes text | Reply in the thread under L's name; the response becomes `REPLIED`; no new obligation | yes |
 | 20 | Lead DM | L clicks **Reply — response required** | Thread post with "Your written response is due …" and a Respond button. New `FOLLOW_UP_RESPONSE` obligation `PENDING`. A's next written submission satisfies it. | `test_requesting_a_response_creates_one_new_obligation` |
 | 21 | — | Deadline | Required items are due 7 calendar days after delivery | `test_ready_row_sends_once…` |
-| 22 | Agent behaviors, unacknowledged, past due (set `due_at_override` a few minutes ahead) | Wait one poll | **One** standard reminder in the thread mentioning only A. L gets no DM. | `test_overdue_items_get_one_standard_reminder_in_the_thread_and_no_lead_dm` |
+| 22 | Agent behaviors, unacknowledged, past due (set `due_at_override` a few minutes ahead) | Wait a minute past it (no `/reachout_poll` needed) | **One** standard reminder in the thread mentioning only A. L gets no DM. | `test_overdue_items_get_one_standard_reminder_in_the_thread_and_no_lead_dm` |
 | 23 | Overdue DM sent to L before this change | L clicks **Send reminder** twice | One reminder in the thread mentioning only A. Second click: "Already handled". | `test_reminder_rechecks_state…` |
 | 24 | Same | A responds, then L clicks **Custom reminder** | "No longer needed"; nothing posted | `test_agent_response_makes_reminder_actions_stale` |
 | 25 | Same | L clicks **Snooze** → 1 hour | `due_at` unchanged; one automatic reminder in the thread an hour later | `test_snooze_defers…` |

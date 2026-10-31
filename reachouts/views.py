@@ -547,7 +547,7 @@ def register_reachouts(bot, service):
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            stats = await service.tick(full=True, send=True)
+            stats = await service.tick()
         except Exception as exc:
             await interaction.followup.send(f"Poll failed: {type(exc).__name__}: {clip(str(exc), 300)}", ephemeral=True)
             return

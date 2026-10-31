@@ -45,7 +45,7 @@ controlled only from `.env`.
   (they are ignored and never overwritten). Do not rename the listed headers.
 - Rows are identified by `reachout_id` / `agent_email`, never by row number. You may sort, filter, and
   move rows.
-- Grey columns are written by the bot. Edits to them are overwritten on the next poll.
+- Grey columns are written by the bot. Edits to them are overwritten on the next `/reachout_poll`.
 - The bot writes with `RAW` input: text that starts with `=` is stored literally, never as a
   formula. Discord IDs are written as text. Type Discord IDs into plain-text-formatted cells (setup
   does this), or Sheets will round them, for example to `1.23457E+17`, and the bot will reject them.
@@ -62,7 +62,7 @@ Discord, and delete the row once it says `SENT`. What was sent, and every reply,
 
 | Column | Purpose | Type | Required | Allowed values | Default | Example | Validation |
 |---|---|---|---|---|---|---|---|
-| `send` | Release control: ticked rows are sent on the next `/reachout_poll` | Checkbox | Yes | Ticked / unticked | Unticked | ☑ | The automatic poll never sends; only `/reachout_poll` does. |
+| `send` | Release control: ticked rows are sent on the next `/reachout_poll` | Checkbox | Yes | Ticked / unticked | Unticked | ☑ | Nothing reads the sheet automatically; only `/reachout_poll` does. |
 | `agent_email` | Who receives it | Text | Yes | An `agent_email` in `Reachout Agents` (case-insensitive) | — | `jordan@company.com` | Must have `directory_status` OK. `…@example.invalid` is always rejected. |
 | `reachout_type` | Category | Dropdown | Yes | `Weekly performance`, `Agent behaviors`, `Opt outs`, `Flagged messages`, `Concerning` | — | `Opt outs` | Case-insensitive. |
 | `title` | Heading shown to the agent | Text | Yes | 1–150 characters | — | `Opt-out handling on 11/3` | |
@@ -130,8 +130,8 @@ and the last known lead.
 
 ### `Reachout History`: one row per sent reachout (the everyday view)
 
-Built from the bot's database, so it is complete however many queue rows you delete. Updated within
-a minute of any change; every row is rewritten on the hourly reconcile and on `/reachout_poll`.
+Built from the bot's database, so it is complete however many queue rows you delete. Updated, and
+every row compared, only when someone runs `/reachout_poll`.
 
 | Column | Meaning |
 |---|---|
@@ -184,7 +184,7 @@ The tabs below are the detailed audit trail. Setup hides them; unhide them from 
 | `requested_by_discord_user_id`, `requesting_response_id` | Lead and lead reply that created a follow-up (blank for the initial acknowledgment) |
 | `required_agent_discord_user_id` | The only user who can satisfy it |
 | `status` | `AWAITING_DELIVERY`, `PENDING`, `SATISFIED`, `SUPERSEDED`, `CANCELLED`, `CLOSED_RESOLVED` |
-| `overdue` | `TRUE` when PENDING and past due. Refreshed when the row changes, and at least hourly. |
+| `overdue` | `TRUE` when PENDING and past due. Refreshed on each `/reachout_poll`. |
 | `created_at`, `delivered_at`, `due_at` | Timestamps |
 | `satisfied_by_response_id`, `satisfied_at` | |
 | `superseded_by`, `closed_at` | |
@@ -234,7 +234,7 @@ recalculated. Poll intervals, test mode, and channel settings are in `.env` (see
 
 | Situation | Result |
 |---|---|
-| A row is ticked but `/reachout_poll` has not been run | Nothing happens; the automatic poll never sends. |
+| A row is ticked but `/reachout_poll` has not been run | Nothing happens; the bot never reads the sheet on its own. |
 | A row shows `ERROR` | Nothing was sent. Fix what `status_detail` says, keep `send` ticked, and run `/reachout_poll` again. |
 | A ticked row is unticked before `/reachout_poll` | Not sent. |
 | A sent row is edited | Discord is not changed. Send a new reachout to correct it. |

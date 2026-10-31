@@ -248,7 +248,8 @@ Members with `Ops Bot Admin` or Discord Administrator can use:
 
 - `/access_status @member`
 - `/access_sync @member`
-- `/reachout_status reachout_id`, `/reachout_poll`, `/reachout_retry_failed` (when reachouts are enabled)
+- `/reachout_status reachout_id`, `/reachout_poll`, `/reachout_retry_failed` (when reachouts are enabled).
+  `/reachout_poll` is the only thing that reads or writes the reachout Sheet; the bot never polls it on its own.
 
 Any verified agent can run `/workflow` privately.
 

@@ -38,26 +38,27 @@ lead (never the agent) when a required item is overdue.
 
 ## Processing flow
 
-Every `REACHOUT_POLL_SECONDS` (default 60), `ReachoutService.tick()` runs these steps. A failure
-in one step never blocks the others.
+Sheets are read and written **only when an admin runs `/reachout_poll`**, which calls
+`ReachoutService.tick()` and runs every step below. There is no automatic Sheets check. Separately,
+every `REACHOUT_POLL_SECONDS` (default 60) `ReachoutLoop` runs only steps 7 and 8
+(`background_tick()`), which never touch Sheets. A failure in one step never blocks the others.
 
 1. **Read.** One batched Sheets read covers `Reachout Queue`, `Reachout Agents`,
    and `Reachout Config`, with formatted values, so formula results are read like typed text.
 2. **Config.** The bot parses config, falls back to defaults for invalid keys, and
    writes each key's status to `bot_status`. The last good config is kept in SQLite.
-3. **Directory.** The bot validates `Reachout Agents` against the roster (re-read every
-   `REACHOUT_ROSTER_REFRESH_MINUTES`) and Discord membership. It detects lead reassignment and
+3. **Directory.** The bot validates `Reachout Agents` against the roster (read fresh on each poll)
+   and Discord membership. It detects lead reassignment and
    queues channel-permission updates.
-4. **Queue.** Only on `/reachout_poll`: each row with `send` ticked and no `reachout_id` is re-read
+4. **Queue.** Each row with `send` ticked and no `reachout_id` is re-read
    on its own. If it is unchanged, the bot records a new ID in SQLite, writes it to the row, and
    processes that row in the same pass; every row with a known ID goes through the dispatch state
-   machine below. The automatic poll never sends; it only refreshes queue status cells.
+   machine below.
 5. **Write back.** Only bot-managed cells whose value differs are written, in batched `RAW`
    updates. Queue cells are located by `reachout_id` just before writing, because operators delete
    queue rows by hand.
 6. **Mirror.** Changed responses, obligations, events and Reachout History rows are upserted to
-   their tabs. A full comparison runs every `REACHOUT_FULL_RECONCILE_MINUTES` (default 60), on the
-   first tick after start (which also backfills History), and on `/reachout_poll`.
+   their tabs. Every `/reachout_poll` compares every row with SQLite.
 7. **Nudges.** The bot creates one nudge per overdue pending obligation whose `next_nudge_at` has
    passed.
 8. **Jobs.** The bot runs due Discord side effects: posts, DMs, message edits, permission updates.
@@ -65,10 +66,11 @@ in one step never blocks the others.
 Agent and lead button actions run the job queue immediately after saving, so thread posts and lead
 DMs normally appear within seconds.
 
-**Latency.** Ticked rows are delivered within seconds of `/reachout_poll`. Delivery details appear
-in Sheets on the following poll, within about one poll interval. Batches are capped by `REACHOUT_BATCH_SIZE`
-(default 10 new IDs per poll and 10 jobs per claim). Discord rate limits are handled by discord.py.
-A Sheets 429 or 5xx error fails that poll, which retries on the next tick and alerts at most hourly.
+**Latency.** Ticked rows are delivered within seconds of `/reachout_poll`. Delivery details,
+responses, History, roster and lead changes, and Config edits reach Sheets or the bot only on the
+next `/reachout_poll`; between polls Sheets can be out of date, but SQLite and Discord are not.
+Jobs are claimed `REACHOUT_BATCH_SIZE` (default 10) at a time. Discord rate limits are handled by
+discord.py. A Sheets 429 or 5xx error fails that poll; run `/reachout_poll` again.
 
 ## State model
 
@@ -137,9 +139,9 @@ clicked, so an old DM can never act.
 
 | Data | Authoritative system | Notes |
 |---|---|---|
-| Operator inputs (`send`, content) | Sheets `Reachout Queue` | Read every poll, acted on only by `/reachout_poll`. Content is snapshotted at release; rows may then be deleted. |
+| Operator inputs (`send`, content) | Sheets `Reachout Queue` | Read and acted on only by `/reachout_poll`. Content is snapshotted at release; rows may then be deleted. |
 | Delivered content and conversation | SQLite `reachouts.snapshot_json`, `reachout_responses` | Mirrored to `Reachout History`. Later row edits never change it. |
-| Agent directory inputs (channel, timezone, fallback, active) | Sheets `Reachout Agents`; the lead is the roster's `Team Lead Email` | Cached in `reachout_agents`. Button authorization uses this cache (at most one poll old). |
+| Agent directory inputs (channel, timezone, fallback, active) | Sheets `Reachout Agents`; the lead is the roster's `Team Lead Email` | Cached in `reachout_agents`. Button authorization uses this cache (as of the last `/reachout_poll`). |
 | Agent name, roster Active | Sheets `Discord Access` | Existing roster. |
 | Agent Discord ID | SQLite `verified_users` | Existing verification flow. |
 | Reachout IDs, dispatch and workflow state, obligations, responses, nudges, events, jobs | SQLite | Mirrored to Sheets. Edits to mirrored cells are overwritten. |
