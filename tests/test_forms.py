@@ -22,7 +22,7 @@ from forms.domain import (
     validate_category,
 )
 from integrations.forms_sheets import HEADERS, sheet_values
-from forms.views import AdjustmentTypeView, HourView, MessageModal, MinuteView, _confirmation
+from forms.views import AdjustmentTypeView, HourView, MessageModal, MinuteView, TopLevelView, _confirmation, register_forms
 from forms.service import DEFAULT_FORM_ERROR_CHANNEL_ID, FormsService
 
 
@@ -99,6 +99,21 @@ class DatetimeTests(unittest.TestCase):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_menu_offers_when_i_work_and_one_combined_qs_and_feedback_form(self):
+        options = TopLevelView(None, 1).children[0].options
+        self.assertEqual([(o.label, o.value) for o in options], [("When I Work", "when_i_work"), ("Qs & Feedback", "question")])
+        modal = MessageModal(None, FormState(form_type="question", category="Pay"))
+        self.assertEqual(modal.title, "Qs & Feedback")
+        self.assertEqual(modal.message_input.label, "Ask anything")
+        self.assertEqual(modal.message_input.placeholder, "Please make sure your description is clear.")
+
+    def test_forms_open_with_the_workflow_command(self):
+        commands = {}
+        bot = SimpleNamespace(add_view=lambda view: None, tree=SimpleNamespace(
+            command=lambda name, description: lambda func: commands.setdefault(name, func)))
+        register_forms(bot, None)
+        self.assertEqual(list(commands), ["workflow"])
+
     def test_editable_form_config_controls_modal_question(self):
         modal = MessageModal(None, FormState(form_type="question"))
         self.assertEqual(modal.message_input.label, FORM_CONFIG["message_fields"]["question"]["question"])
@@ -377,3 +392,104 @@ class SubmitTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(again["_review_posted"])
         self.service.sync_one.assert_not_awaited()
         self.service.post_review.assert_not_awaited()
+
+
+class ReviewDmTests(SubmitTests.__base__):
+    """The Send DM button on Qs & Feedback review cards."""
+
+    async def asyncSetUp(self):
+        await SubmitTests.asyncSetUp(self)
+        self.employee = SimpleNamespace(send=AsyncMock())
+        self.service.bot.get_user = lambda user_id: self.employee if user_id == 123 else None
+        self.row = await self.service.submit(SubmitTests.interaction(self), FormState("question", category="Pay"), "hi")
+        self.service.repository.set_review_message(self.row["submission_id"], 77, 555)
+        self.audit.reset_mock()
+        patch("forms.service.is_admin", side_effect=lambda interaction: interaction.user.id != 999).start()
+
+    def reviewer(self, user_id=456, message_id=555):
+        response = SimpleNamespace(send_message=AsyncMock())
+        return SimpleNamespace(guild_id=1, user=SimpleNamespace(id=user_id), response=response,
+                               followup=SimpleNamespace(send=AsyncMock()),
+                               message=SimpleNamespace(id=message_id, reply=AsyncMock()))
+
+    def test_only_qs_and_feedback_cards_get_the_button(self):
+        from forms.views import ReviewView
+        ids = lambda view: [item.custom_id for item in view.children]
+        self.assertIn("opsbot:forms:review:dm", ids(ReviewView(None, "question", disabled=True)))
+        self.assertIn("opsbot:forms:review:dm", ids(ReviewView(None)))  # persistent routing after restart
+        self.assertNotIn("opsbot:forms:review:dm", ids(ReviewView(None, "when_i_work", "timesheet_adjustment")))
+
+    async def test_sends_the_dm_notes_it_on_the_card_and_audits_it(self):
+        interaction = self.reviewer()
+        self.assertEqual((await self.service.dm_target(interaction))["submission_id"], self.row["submission_id"])
+        await self.service.send_dm(interaction, self.row["submission_id"], "Payroll runs Friday.")
+        text = self.employee.send.await_args.args[0]
+        self.assertIn(self.row["submission_id"], text)
+        self.assertIn("Payroll runs Friday.", text)
+        self.assertIn("Payroll runs Friday.", interaction.message.reply.await_args.args[0])
+        self.assertEqual(self.audit.call_args.args[2], "FORM_DM_SENT")
+        self.assertEqual(self.service.repository.get(self.row["submission_id"])["status"], "Pending")
+
+    async def test_non_admins_and_the_submitter_cannot_send(self):
+        for user_id in (999, 123):
+            interaction = self.reviewer(user_id=user_id)
+            self.assertIsNone(await self.service.dm_target(interaction))
+            interaction.response.send_message.assert_awaited_once()
+        await self.service.send_dm(self.reviewer(user_id=999), self.row["submission_id"], "hi")
+        self.employee.send.assert_not_awaited()
+
+    async def test_closed_dms_are_reported_to_the_reviewer(self):
+        import discord
+        self.employee.send.side_effect = discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "closed")
+        interaction = self.reviewer()
+        await self.service.send_dm(interaction, self.row["submission_id"], "hi")
+        self.assertIn("could not be delivered", interaction.followup.send.await_args.args[0])
+        self.assertEqual(self.audit.call_args.args[2], "FORM_DM_FAILED")
+        interaction.message.reply.assert_not_awaited()
+
+
+class SheetHeaderTests(unittest.TestCase):
+    def worksheet_for(self, headers):
+        from integrations.forms_sheets import FormsSheet
+        worksheet = SimpleNamespace(row_values=lambda row: list(headers), updates=[])
+        worksheet.update = lambda range_name, values: worksheet.updates.append(values)
+        spreadsheet = SimpleNamespace(worksheet=lambda tab: worksheet)
+        sheet = FormsSheet(None)
+        sheet._spreadsheet = lambda: spreadsheet
+        return sheet, worksheet
+
+    def test_tabs_with_the_old_employee_headers_are_relabeled_in_place(self):
+        tab = "Questions Concerns Feedback"
+        old = [{"Agent Email": "Employee Email", "Agent Name": "Employee Name"}.get(h, h) for h in HEADERS[tab]]
+        self.assertNotEqual(old, HEADERS[tab])
+        sheet, worksheet = self.worksheet_for(old)
+        sheet._worksheet(tab)
+        self.assertEqual(worksheet.updates, [[HEADERS[tab]]])
+
+    def test_other_header_mismatches_still_stop_the_sync(self):
+        sheet, worksheet = self.worksheet_for(["Something else"])
+        with self.assertRaisesRegex(RuntimeError, "required headers"):
+            sheet._worksheet("Questions Concerns Feedback")
+        self.assertEqual(worksheet.updates, [])
+
+
+class RosterNameTests(unittest.TestCase):
+    def test_full_name_uses_first_and_last_name_columns(self):
+        from integrations.google_sheets import full_name
+        self.assertEqual(full_name({"First Name": " Jordan ", "Last Name": "Lee"}), "Jordan Lee")
+        self.assertEqual(full_name({"Name": "Old Style"}), "Old Style")
+        self.assertEqual(full_name({}), "")
+
+
+class ConnectionTests(unittest.TestCase):
+    def test_with_blocks_close_their_connection(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as directory:
+            repository = FormsRepository(Path(directory) / "forms.db")
+            repository.init()
+            with repository.connect() as con:
+                con.execute("SELECT 1")
+            with self.assertRaises(sqlite3.ProgrammingError):
+                con.execute("SELECT 1")  # closed
+            row, _ = repository.create(submission_values("closing"))
+            self.assertEqual(repository.get(row["submission_id"])["interaction_id"], "closing")

@@ -8,11 +8,11 @@
     "Fashion Nova",
     "Concierge",
     "Concierge - Nadir",
-    "Concierge - Thandeka",
-    "Concierge - Mohammed",
-    "Concierge - Flex",
+    "Concierge - Josh",
+    "Concierge - Thaniel",
     "Workflows",
-    "Leadership"
+    "Leadership",
+    "QA"
   ],
   "sheet_columns": {
     "Professional Services": "Professional Services",
@@ -21,12 +21,17 @@
     "Order Operations": "Order Operations",
     "Fashion Nova": "Fashion Nova",
     "Workflows": "Workflows",
-    "Leadership": "Leadership"
+    "Leadership": "Leadership",
+    "QA": "QA"
   },
   "concierge_teams": {
     "Nadir": "Concierge - Nadir",
-    "Thandeka": "Concierge - Thandeka",
-    "Mohammed": "Concierge - Mohammed",
-    "Flex": "Concierge - Flex"
+    "Josh": "Concierge - Josh",
+    "Thaniel": "Concierge - Thaniel"
+  },
+  "team_leads": {
+    "nadirhrustanbegovic@gmail.com": "Nadir",
+    "work.joshuarivo@gmail.com": "Josh",
+    "nthnlpnc@gmail.com": "Thaniel"
   }
 }

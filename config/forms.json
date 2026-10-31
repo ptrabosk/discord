@@ -1,7 +1,7 @@
 {
   "form_names": {
     "when_i_work": "When I Work",
-    "question": "Question",
+    "question": "Qs & Feedback",
     "concern": "Concern",
     "feedback": "Feedback"
   },
@@ -48,9 +48,9 @@
       "placeholder": "Explain why you need to release this shift"
     },
     "question": {
-      "title": "Question",
-      "question": "Question",
-      "placeholder": "Type your question"
+      "title": "Qs & Feedback",
+      "question": "Ask anything",
+      "placeholder": "Please make sure your description is clear."
     },
     "concern": {
       "title": "Concern",

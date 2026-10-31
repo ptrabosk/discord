@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from database.database import ClosingConnection
 from forms.domain import VALID_STATUSES, submission_prefix
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "opsbot.db"
@@ -53,7 +54,7 @@ class FormsRepository:
 
     def connect(self):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        con = sqlite3.connect(self.db_path)
+        con = sqlite3.connect(self.db_path, factory=ClosingConnection)
         con.row_factory = sqlite3.Row
         return con
 

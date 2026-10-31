@@ -12,6 +12,8 @@ from bot.commands import register_commands
 from bot.sync import AccessSync
 from forms.service import FormsService, FormsSync
 from forms.views import register_forms
+from reachouts.service import ReachoutLoop, ReachoutService, reachouts_enabled
+from reachouts.views import register_reachouts
 
 load_dotenv()
 
@@ -32,11 +34,14 @@ class OpsBot(commands.Bot):
         self.guild_id = GUILD_ID
         self.sheet = AccessSheet()
         self.forms = FormsService(self, self.sheet)
+        self.reachouts = ReachoutService(self, self.sheet) if reachouts_enabled() else None
 
     async def setup_hook(self):
         self.add_view(VerifyView(self.sheet))
         register_commands(self, self.sheet)
         register_forms(self, self.forms)
+        if self.reachouts:
+            register_reachouts(self, self.reachouts)
         guild_obj = discord.Object(id=GUILD_ID)
         self.tree.copy_global_to(guild=guild_obj)
         await self.tree.sync(guild=guild_obj)
@@ -52,6 +57,11 @@ async def on_ready():
     if not hasattr(bot, "_forms_sync"):
         bot._forms_sync = FormsSync(bot, bot.forms, FORMS_SYNC_MINUTES)
         bot._forms_sync.loop.start()
+    # `main.py setup` only builds the server; it must not poll or send reachouts.
+    setup_mode = len(sys.argv) > 1 and sys.argv[1].lower() == "setup"
+    if bot.reachouts and not setup_mode and not hasattr(bot, "_reachout_loop"):
+        bot._reachout_loop = ReachoutLoop(bot, bot.reachouts)
+        bot._reachout_loop.loop.start()
 
 async def post_setup_message(guild):
     channel = discord.utils.get(guild.text_channels, name="initial-setup")
@@ -90,8 +100,14 @@ async def run_setup_when_ready():
 
 if __name__ == "__main__":
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "reachout-sheet-setup":
+        # Sheets only: this never logs in to Discord, so it cannot message anyone.
+        from reachouts.sheets import setup_cli
+        sys.exit(setup_cli())
     init_db()
     bot.forms.repository.init()
+    if bot.reachouts:
+        bot.reachouts.init()
     if len(sys.argv) > 1 and sys.argv[1].lower() == "setup":
         async def runner():
             task = asyncio.create_task(run_setup_when_ready())

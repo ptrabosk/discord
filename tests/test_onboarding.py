@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from database import database
 from bot.onboarding import DAILY_CODES, DAILY_FAILED_GUESSES, code_request_blocked, guesses_exhausted
@@ -88,6 +88,79 @@ class VerificationEmailTest(unittest.TestCase):
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertTrue(context.check_hostname)
         smtp.send_message.assert_called_once()
+
+
+
+class TeamLeadRoleTests(unittest.TestCase):
+    def test_team_roles_follow_the_team_lead_email(self):
+        from bot import permissions
+
+        with patch.dict(permissions.TEAM_LEADS, {"nadir@example.com": "Nadir"}, clear=True):
+            agent = {"Active": "TRUE", "Email": "a@example.com", "Team Lead email": "Nadir@Example.com", "QA": "TRUE"}
+            self.assertEqual(permissions.desired_roles(agent), {"Verified", "Concierge - Nadir", "QA"})
+            lead = {"Active": "TRUE", "Email": "nadir@example.com", "Team Lead Email": ""}
+            self.assertIn("Concierge - Nadir", permissions.desired_roles(lead))
+            leader = {"Active": "TRUE", "Email": "boss@example.com", "Leadership": "TRUE", "Team Lead Email": ""}
+            self.assertEqual(permissions.desired_roles(leader), {"Verified", "Leadership"})
+            old_roster = {"Active": "TRUE", "Email": "b@example.com", "Concierge": "TRUE", "Concierge Team": "Josh"}
+            self.assertEqual(permissions.desired_roles(old_roster), {"Verified", "Concierge", "Concierge - Josh"})
+
+
+class ModalAcknowledgementTests(unittest.IsolatedAsyncioTestCase):
+    """Both modals must defer before slow work, or Discord expires the interaction after 3 seconds."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = patch.object(database, "DB_PATH", Path(self.tmp.name) / "opsbot.db")
+        self.db_path.start()
+        database.init_db()
+
+    def tearDown(self):
+        self.db_path.stop()
+        self.tmp.cleanup()
+
+    def interaction(self, calls):
+        interaction = MagicMock()
+        interaction.user.id = 42
+        interaction.response.defer = AsyncMock(side_effect=lambda **_: calls.append("defer"))
+        interaction.response.send_message = AsyncMock()
+        interaction.followup.send = AsyncMock(side_effect=lambda *a, **_: calls.append("followup"))
+        return interaction
+
+    async def test_email_modal_defers_before_sheet_lookup_and_email(self):
+        from bot import onboarding
+
+        calls = []
+        sheet = MagicMock()
+        sheet.get_by_email.side_effect = lambda _: calls.append("sheet") or {"Active": "TRUE"}
+        modal = onboarding.EmailModal(sheet)
+        modal.email = EMAIL
+        interaction = self.interaction(calls)
+        with patch.object(onboarding, "_allowed", return_value=True), \
+                patch.object(onboarding, "send_verification_email", side_effect=lambda *_: calls.append("smtp")):
+            await modal.on_submit(interaction)
+
+        self.assertEqual(calls, ["defer", "sheet", "smtp", "followup"])
+        interaction.response.send_message.assert_not_called()
+        self.assertTrue(interaction.followup.send.call_args.kwargs["ephemeral"])
+
+    async def test_code_modal_defers_before_sheet_lookup_and_role_sync(self):
+        from bot import onboarding
+
+        calls = []
+        database.save_code(42, EMAIL, onboarding._hash("123456"), "2099-01-01T00:00:00+00:00")
+        sheet = MagicMock()
+        sheet.get_by_email.side_effect = lambda _: calls.append("sheet") or {"Active": "TRUE"}
+        modal = onboarding.CodeModal(sheet)
+        modal.code = "123456"
+        interaction = self.interaction(calls)
+        sync = AsyncMock(side_effect=lambda *_: calls.append("sync") or ([], []))
+        with patch.object(onboarding, "sync_member_roles", sync):
+            await modal.on_submit(interaction)
+
+        self.assertEqual(calls, ["defer", "sheet", "sync", "followup"])
+        interaction.response.send_message.assert_not_called()
+        self.assertIsNotNone(database.get_verified_user(42))
 
 
 if __name__ == "__main__":

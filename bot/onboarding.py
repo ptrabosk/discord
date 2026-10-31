@@ -62,9 +62,11 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
         self.sheet = sheet
 
     async def on_submit(self, interaction):
+        # Discord expires an unacknowledged interaction after 3 seconds; the sheet lookup and SMTP send can take longer.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         email = str(self.email).strip().lower()
         if not EMAIL_RE.match(email) or not _allowed(email):
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "We couldn't verify this email. Contact Operations if you believe you should have access.",
                 ephemeral=True
             )
@@ -74,14 +76,14 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
         blocked = code_request_blocked(interaction.user.id, email)
         if blocked:
             audit(interaction.user.id, email, "VERIFICATION_THROTTLED", blocked)
-            await interaction.response.send_message(THROTTLED, ephemeral=True)
+            await interaction.followup.send(THROTTLED, ephemeral=True)
             return
 
         record = await asyncio.to_thread(self.sheet.get_by_email, email)
         existing = get_verified_by_email(email)
         if not record or not truthy(record.get("Active")) or (existing and existing[0] != interaction.user.id):
             audit(interaction.user.id, email, "VERIFICATION_FAILED", "Email not authorized or already linked")
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "We couldn't verify this email. Contact Operations if you believe you should have access.",
                 ephemeral=True
             )
@@ -94,7 +96,7 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
         save_code(interaction.user.id, email, _hash(code), expiry)
         await asyncio.to_thread(send_verification_email, email, code)
         audit(interaction.user.id, email, "VERIFICATION_SENT")
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Verification email sent to {_mask(email)}.",
             view=CodeView(self.sheet), ephemeral=True
         )
@@ -107,32 +109,33 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
         self.sheet = sheet
 
     async def on_submit(self, interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
         row = get_code(interaction.user.id)
         max_attempts = int(os.getenv("VERIFICATION_MAX_ATTEMPTS","5"))
         if not row:
-            await interaction.response.send_message("No active verification request. Start again.", ephemeral=True)
+            await interaction.followup.send("No active verification request. Start again.", ephemeral=True)
             return
         email, code_hash, expires_at, attempts, _ = row
         if guesses_exhausted(interaction.user.id, email):
             delete_code(interaction.user.id)
             audit(interaction.user.id, email, "VERIFICATION_THROTTLED", "daily_guess_limit")
-            await interaction.response.send_message(THROTTLED, ephemeral=True)
+            await interaction.followup.send(THROTTLED, ephemeral=True)
             return
         if attempts >= max_attempts or datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
             delete_code(interaction.user.id)
-            await interaction.response.send_message("Verification expired. Start again.", ephemeral=True)
+            await interaction.followup.send("Verification expired. Start again.", ephemeral=True)
             return
         if not hmac.compare_digest(_hash(str(self.code).strip()), code_hash):
             increment_attempts(interaction.user.id)
             audit(interaction.user.id, email, "VERIFICATION_FAILED", "Incorrect code")
-            await interaction.response.send_message("Incorrect verification code.", ephemeral=True)
+            await interaction.followup.send("Incorrect verification code.", ephemeral=True)
             return
 
         # Re-read source of truth immediately before authorization.
         record = await asyncio.to_thread(self.sheet.get_by_email, email)
         if not record or not truthy(record.get("Active")):
             delete_code(interaction.user.id)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "We couldn't verify this email. Contact Operations if you believe you should have access.",
                 ephemeral=True
             )
@@ -142,7 +145,7 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
         delete_code(interaction.user.id)
         added, removed = await sync_member_roles(interaction.user, record)
         audit(interaction.user.id, email, "USER_VERIFIED", f"Added={added}; Removed={removed}")
-        await interaction.response.send_message("Verified. Your authorized access has been applied.", ephemeral=True)
+        await interaction.followup.send("Verified. Your authorized access has been applied.", ephemeral=True)
 
 class CodeView(discord.ui.View):
     def __init__(self, sheet):

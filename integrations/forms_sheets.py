@@ -11,21 +11,25 @@ from forms.domain import sheet_tab_for
 HEADERS = {
     "WIW Timesheet Adjustments": [
         "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
-        "Employee Email", "Employee Name", "Status", "Adjustment Type", "Start Time ET",
+        "Agent Email", "Agent Name", "Status", "Adjustment Type", "Start Time ET",
         "Start Time UTC", "End Time ET", "End Time UTC", "Adjustment Reason", "Reviewed By",
         "Reviewed At ET", "Reviewed At UTC",
     ],
     "WIW Emergency Releases": [
         "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
-        "Employee Email", "Employee Name", "Status", "Shift Start ET", "Shift Start UTC",
+        "Agent Email", "Agent Name", "Status", "Shift Start ET", "Shift Start UTC",
         "Release Reason", "Reviewed By", "Reviewed At ET", "Reviewed At UTC",
     ],
     "Questions Concerns Feedback": [
         "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
-        "Employee Email", "Employee Name", "Type", "Category", "Message", "Status",
+        "Agent Email", "Agent Name", "Type", "Category", "Message", "Status",
         "Reviewed By", "Reviewed At ET", "Reviewed At UTC",
     ],
 }
+
+
+# Headers renamed when employees became "agents"; older tabs are relabeled on first use.
+LEGACY_HEADERS = {"Agent Email": "Employee Email", "Agent Name": "Employee Name"}
 
 
 def _reviewed_by(row):
@@ -74,6 +78,10 @@ class FormsSheet:
             worksheet = spreadsheet.add_worksheet(title=tab, rows=100, cols=len(HEADERS[tab]))
             worksheet.update(range_name="A1", values=[HEADERS[tab]])
         actual_headers = worksheet.row_values(1)
+        if actual_headers == [LEGACY_HEADERS.get(h, h) for h in HEADERS[tab]]:
+            # Same columns under their pre-rename names: relabel the header row in place.
+            worksheet.update(range_name="A1", values=[HEADERS[tab]])
+            actual_headers = HEADERS[tab]
         if actual_headers != HEADERS[tab]:
             raise RuntimeError(f"Worksheet {tab!r} does not have the required headers")
         return worksheet

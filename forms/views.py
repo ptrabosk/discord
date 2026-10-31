@@ -20,6 +20,9 @@ from forms.domain import (
 
 log = logging.getLogger(__name__)
 
+# Concern and Feedback are retired from the menu; their stored rows still render and review.
+MENU_FORMS = ("when_i_work", "question")
+
 
 def _date_label(day: date) -> str:
     return f"{day:%A, %b} {day.day}, {day.year}"
@@ -86,7 +89,7 @@ async def open_private_form(interaction: discord.Interaction, service):
 
 
 class FormLauncherView(discord.ui.View):
-    """Keep older posted buttons working; new forms start with /form."""
+    """Keep older posted buttons working; new forms start with /workflow."""
 
     def __init__(self, service):
         super().__init__(timeout=None)
@@ -111,8 +114,7 @@ class TopLevelView(OwnedView):
         super().__init__(owner_id)
         self.service = service
         self.add_item(ChoiceSelect(
-            [discord.SelectOption(label=label, value=key)
-             for key, label in FORM_CONFIG["form_names"].items()],
+            [discord.SelectOption(label=FORM_CONFIG["form_names"][key], value=key) for key in MENU_FORMS],
             "Select a form type",
         ))
 
@@ -414,6 +416,41 @@ class ReviewButton(discord.ui.Button):
         await self.service.review(interaction, self.action)
 
 
+class SendDmButton(discord.ui.Button):
+    def __init__(self, service):
+        super().__init__(label="Send DM", style=discord.ButtonStyle.primary, custom_id="opsbot:forms:review:dm")
+        self.service = service
+
+    async def callback(self, interaction: discord.Interaction):
+        row = await self.service.dm_target(interaction)
+        if row:
+            await interaction.response.send_modal(SendDmModal(self.service, row["submission_id"]))
+
+
+class SendDmModal(discord.ui.Modal, title="Send DM to submitter"):
+    message = discord.ui.TextInput(
+        label="Message",
+        placeholder="Sent privately to the agent who submitted this form",
+        style=discord.TextStyle.paragraph,
+        min_length=1,
+        max_length=1500,
+    )
+
+    def __init__(self, service, submission_id: str):
+        super().__init__(timeout=900)
+        self.service = service
+        self.submission_id = submission_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.service.send_dm(interaction, self.submission_id, str(self.message).strip())
+
+    async def on_error(self, interaction, error):
+        log.exception("Form DM failed", exc_info=error)
+        await _ephemeral_error(interaction, "The DM could not be sent. Please try again.")
+        await self.service.alert_error("form_dm_failed", interaction_id=interaction.id, error=error)
+
+
 class ReviewView(discord.ui.View):
     def __init__(self, service, form_type=None, form_subtype=None, disabled=False):
         super().__init__(timeout=None)
@@ -425,6 +462,9 @@ class ReviewView(discord.ui.View):
         )
         for action in actions:
             self.add_item(ReviewButton(action, service, disabled=disabled))
+        # Qs & Feedback reviewers can message the submitter at any time, even after closing it.
+        if form_type in (None, "question"):
+            self.add_item(SendDmButton(service))
 
     async def on_error(self, interaction, error, item):
         log.exception("Form review interaction failed", exc_info=error)
@@ -443,8 +483,8 @@ def review_embed(row: dict) -> discord.Embed:
         color=discord.Color.blue(),
     )
     embed.add_field(name="Submission ID", value=row["submission_id"], inline=False)
-    embed.add_field(name="Employee", value=row["employee_name"], inline=True)
-    embed.add_field(name="Employee Email", value=row["employee_email"], inline=True)
+    embed.add_field(name="Agent", value=row["employee_name"], inline=True)
+    embed.add_field(name="Agent Email", value=row["employee_email"], inline=True)
     embed.add_field(name="Status", value=row["status"], inline=True)
     if row.get("adjustment_type"):
         embed.add_field(name="Adjustment Type", value=row["adjustment_type"], inline=False)
@@ -456,7 +496,7 @@ def review_embed(row: dict) -> discord.Embed:
     if row.get("end_time_et"):
         embed.add_field(name="End Time ET", value=_datetime_label(row["end_time_et"]), inline=False)
     message_label = {
-        "question": "Question",
+        "question": "Message",
         "concern": "Concern",
         "feedback": "Feedback",
     }.get(row["form_type"], "Reason")
@@ -476,8 +516,8 @@ def register_forms(bot, service):
     bot.add_view(FormLauncherView(service))
     bot.add_view(ReviewView(service))
 
-    @bot.tree.command(name="form", description="Open your private employee form")
-    async def form(interaction: discord.Interaction):
+    @bot.tree.command(name="workflow", description="Open your private agent form")
+    async def workflow(interaction: discord.Interaction):
         try:
             await open_private_form(interaction, service)
         except Exception as exc:

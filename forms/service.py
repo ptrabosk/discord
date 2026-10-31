@@ -22,7 +22,7 @@ from forms.domain import (
     validate_category,
 )
 from integrations.forms_sheets import FormsSheet
-from integrations.google_sheets import truthy
+from integrations.google_sheets import full_name, truthy
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ class FormsService:
         interaction_id: int | None = None,
         error: Exception | None = None,
     ):
-        """Send operational failures to a private channel, never to employees."""
+        """Send operational failures to a private channel, never to agents."""
         reference = row["submission_id"] if row else f"interaction {interaction_id}"
         try:
             channel_id = int(os.getenv("FORM_ERROR_CHANNEL_ID") or DEFAULT_FORM_ERROR_CHANNEL_ID)
@@ -131,10 +131,10 @@ class FormsService:
             raise PermissionError("Complete work-email verification before submitting a form.")
         record = await asyncio.to_thread(self.access_sheet.get_by_email, email)
         if not record or not truthy(record.get("Active")):
-            raise PermissionError("Your verified employee record is not currently active.")
-        name = str(record.get("Name", "")).strip()
+            raise PermissionError("Your verified agent record is not currently active.")
+        name = full_name(record)
         if not name:
-            raise ValueError("Your employee record is missing a name. Contact Operations.")
+            raise ValueError("Your agent record is missing a name. Contact Operations.")
         return email, name
 
     async def submit(self, interaction: discord.Interaction, state: FormState, message: str) -> dict:
@@ -306,6 +306,54 @@ class FormsService:
         await interaction.followup.send(
             f"{row['submission_id']} updated to {new_status}.", ephemeral=True
         )
+
+    async def dm_target(self, interaction: discord.Interaction) -> dict | None:
+        """The Qs & Feedback submission behind a review card, if this reviewer may message its submitter."""
+        if interaction.guild_id != self.bot.guild_id or not is_admin(interaction):
+            await interaction.response.send_message("Not authorized to review forms.", ephemeral=True)
+            return None
+        row = self.repository.get_by_review_message(interaction.message.id)
+        if not row or row["form_type"] != "question":
+            await interaction.response.send_message("This submission could not be found.", ephemeral=True)
+            return None
+        if row["discord_user_id"] == interaction.user.id:
+            await interaction.response.send_message("You cannot review your own submission.", ephemeral=True)
+            return None
+        return row
+
+    async def send_dm(self, interaction: discord.Interaction, submission_id: str, text: str):
+        if interaction.guild_id != self.bot.guild_id or not is_admin(interaction):
+            await interaction.followup.send("Not authorized to review forms.", ephemeral=True)
+            return
+        row = self.repository.get(submission_id)
+        if not text:
+            await interaction.followup.send("The message cannot be empty.", ephemeral=True)
+            return
+        try:
+            user = self.bot.get_user(row["discord_user_id"]) or await self.bot.fetch_user(row["discord_user_id"])
+            await user.send(
+                f"**Message from Operations about your Qs & Feedback submission {row['submission_id']}**\n\n{text}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            log.warning("Could not DM submitter for %s: %r", row["submission_id"], exc)
+            audit(row["discord_user_id"], row["employee_email"], "FORM_DM_FAILED",
+                  f"Submission={row['submission_id']}; Reviewer={interaction.user.id}")
+            await interaction.followup.send(
+                "The DM could not be delivered. The agent may have DMs from server members turned off.",
+                ephemeral=True,
+            )
+            return
+        audit(row["discord_user_id"], row["employee_email"], "FORM_DM_SENT",
+              f"Submission={row['submission_id']}; Reviewer={interaction.user.id}")
+        try:
+            await interaction.message.reply(
+                f"DM sent to the submitter by <@{interaction.user.id}>:\n>>> {text}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except (AttributeError, discord.HTTPException):
+            log.warning("Could not note the DM on the review card for %s", row["submission_id"])
+        await interaction.followup.send(f"DM sent for {row['submission_id']}.", ephemeral=True)
 
     async def _notify_submitter(self, row: dict):
         try:

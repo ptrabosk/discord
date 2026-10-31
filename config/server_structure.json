@@ -8,11 +8,11 @@
     "Fashion Nova",
     "Concierge",
     "Concierge - Nadir",
-    "Concierge - Thandeka",
-    "Concierge - Mohammed",
-    "Concierge - Flex",
+    "Concierge - Josh",
+    "Concierge - Thaniel",
     "Workflows",
     "Leadership",
+    "QA",
     "Ops Bot Admin"
   ],
   "categories": [
@@ -130,16 +130,12 @@
           "role": "Concierge - Nadir"
         },
         {
-          "name": "team-thandeka",
-          "role": "Concierge - Thandeka"
+          "name": "team-josh",
+          "role": "Concierge - Josh"
         },
         {
-          "name": "team-mohammed",
-          "role": "Concierge - Mohammed"
-        },
-        {
-          "name": "team-flex",
-          "role": "Concierge - Flex"
+          "name": "team-thaniel",
+          "role": "Concierge - Thaniel"
         }
       ]
     },
@@ -156,6 +152,21 @@
         },
         {
           "name": "surveys"
+        }
+      ]
+    },
+    {
+      "name": "QA",
+      "role": "QA",
+      "channels": [
+        {
+          "name": "qa-announcements"
+        },
+        {
+          "name": "qa-questions"
+        },
+        {
+          "name": "qa-resources"
         }
       ]
     },

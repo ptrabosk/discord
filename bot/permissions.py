@@ -1,12 +1,18 @@
 import json
 from pathlib import Path
 import discord
-from integrations.google_sheets import truthy
+from integrations.google_sheets import field, truthy
 
 ROOT = Path(__file__).resolve().parents[1]
 ROLE_CONFIG = json.loads((ROOT/"config"/"role_mapping.json").read_text())
 
 MANAGED_ROLES = set(ROLE_CONFIG["managed_roles"])
+# Team lead email -> team key in concierge_teams. A lead's team role comes from their own email;
+# an agent's comes from their Team Lead Email.
+TEAM_LEADS = {email.strip().lower(): team for email, team in ROLE_CONFIG.get("team_leads", {}).items()}
+unknown = sorted(set(TEAM_LEADS.values()) - set(ROLE_CONFIG["concierge_teams"]))
+if unknown:
+    raise ValueError(f"role_mapping.json team_leads uses unknown teams: {', '.join(unknown)}")
 
 def is_admin(interaction):
     return (
@@ -24,8 +30,14 @@ def desired_roles(record):
         if truthy(record.get(column)):
             desired.add(role)
 
+    for email in (field(record, "Team Lead Email"), record.get("Email")):
+        team = TEAM_LEADS.get(str(email or "").strip().lower())
+        if team:
+            desired.add(ROLE_CONFIG["concierge_teams"][team])
+
     if truthy(record.get("Concierge")):
         desired.add("Concierge")
+        # Older rosters named the team directly; kept so access survives until the column is renamed.
         raw = str(record.get("Concierge Team", "")).strip()
         teams = [x.strip() for x in raw.replace(";", ",").split(",") if x.strip()]
         for team in teams:

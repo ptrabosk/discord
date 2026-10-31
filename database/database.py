@@ -4,9 +4,18 @@ from datetime import datetime, timezone
 
 DB_PATH = Path(__file__).resolve().parents[1] / "data" / "opsbot.db"
 
+class ClosingConnection(sqlite3.Connection):
+    """`with connect() as con:` commits (or rolls back) and then closes, unlike plain sqlite3."""
+
+    def __exit__(self, *exc):
+        try:
+            return super().__exit__(*exc)
+        finally:
+            self.close()
+
 def connect():
     DB_PATH.parent.mkdir(exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(DB_PATH, factory=ClosingConnection)
 
 def init_db():
     with connect() as con:
