@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS form_submissions (
     start_time_utc TEXT,
     end_time_et TEXT,
     end_time_utc TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    reference_message_id TEXT,
     message TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'Pending',
     reviewed_by_discord_id INTEGER,
@@ -46,6 +49,8 @@ CREATE TABLE IF NOT EXISTS form_submissions (
 CREATE INDEX IF NOT EXISTS idx_form_submissions_sheets_sync
 ON form_submissions(sheets_sync_status, id);
 """
+# Columns added after the table first shipped; init() adds any an older database lacks.
+ADDED_COLUMNS = ("start_date", "end_date", "reference_message_id")
 
 
 class FormsRepository:
@@ -61,6 +66,10 @@ class FormsRepository:
     def init(self):
         with self.connect() as con:
             con.executescript(SCHEMA)
+            columns = {row["name"] for row in con.execute("PRAGMA table_info(form_submissions)")}
+            for column in ADDED_COLUMNS:
+                if column not in columns:
+                    con.execute(f"ALTER TABLE form_submissions ADD COLUMN {column} TEXT")
 
     def create(self, values: dict) -> tuple[dict, bool]:
         submitted_et = datetime.fromisoformat(values["submitted_at_et"])
@@ -69,7 +78,8 @@ class FormsRepository:
             "interaction_id", "form_type", "form_subtype", "discord_user_id",
             "discord_username", "discord_display_name", "employee_email", "employee_name",
             "submitted_at_utc", "submitted_at_et", "category", "adjustment_type",
-            "start_time_et", "start_time_utc", "end_time_et", "end_time_utc", "message",
+            "start_time_et", "start_time_utc", "end_time_et", "end_time_utc",
+            "start_date", "end_date", "reference_message_id", "message",
         )
         try:
             with self.connect() as con:

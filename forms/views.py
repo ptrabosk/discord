@@ -21,7 +21,7 @@ from forms.domain import (
 log = logging.getLogger(__name__)
 
 # Concern and Feedback are retired from the menu; their stored rows still render and review.
-MENU_FORMS = ("when_i_work", "question")
+MENU_FORMS = ("when_i_work", "question", "dispute", "working_location")
 
 
 def _date_label(day: date) -> str:
@@ -143,6 +143,12 @@ class TopLevelView(OwnedView):
             await self.show(interaction, WhenIWorkView(self.service, self.owner_id, back=self.again))
             return
         state = FormState(form_type=value)
+        if value == "dispute":
+            await interaction.response.send_modal(MessageModal(self.service, state))
+            return
+        if value == "working_location":
+            await self.show(interaction, DateRangeView(self.service, self.owner_id, state, "start", back=self.again))
+            return
         await self.show(interaction, CategoryView(self.service, self.owner_id, state, back=self.again))
 
 
@@ -220,10 +226,13 @@ class DateRangeView(OwnedView):
         self.service = service
         self.state = state
         self.target = target
-        self.prompt = (
-            "**Enter the scheduled shift date and start time in New York / Eastern Time.**\n\n"
-            f"{FORM_CONFIG['prompts']['start_date_range']}"
-        )
+        if state.form_type == "working_location":
+            self.prompt = f"Choose the {target} date range."
+        else:
+            self.prompt = (
+                "**Enter the scheduled shift date and start time in New York / Eastern Time.**\n\n"
+                f"{FORM_CONFIG['prompts']['start_date_range']}"
+            )
         self.again = lambda: DateRangeView(service, owner_id, state, target, back=back)
         first, last = _date_limits()
         ranges = []
@@ -258,9 +267,12 @@ class DateChoiceView(OwnedView):
         self.target = target
         date_prompt = FORM_CONFIG["prompts"][target + "_date"]
         # Timesheet adjustments reach this step straight from the adjustment type, so it leads with the ET rule.
-        self.prompt = (
-            ET_HEADING + date_prompt if state.form_subtype == "timesheet_adjustment" else f"{date_prompt} {ET_NOTE}"
-        )
+        if state.form_type == "working_location":
+            self.prompt = date_prompt
+        elif state.form_subtype == "timesheet_adjustment":
+            self.prompt = ET_HEADING + date_prompt
+        else:
+            self.prompt = f"{date_prompt} {ET_NOTE}"
         self.again = lambda: DateChoiceView(service, owner_id, state, target, first, last, back=back)
         options = []
         cursor = first
@@ -271,6 +283,14 @@ class DateChoiceView(OwnedView):
 
     async def choose(self, interaction, value):
         setattr(self.state, f"{self.target}_date", date.fromisoformat(value))
+        if self.state.form_type == "working_location":
+            if self.target == "start":
+                await self.show(interaction, DateRangeView(
+                    self.service, self.owner_id, self.state, "end", back=self.again,
+                ))
+            else:
+                await interaction.response.send_modal(MessageModal(self.service, self.state))
+            return
         await self.show(interaction, HourView(self.service, self.owner_id, self.state, self.target, back=self.again))
 
 
@@ -332,6 +352,16 @@ class MessageModal(discord.ui.Modal):
         super().__init__(title=fields["title"], timeout=900)
         self.service = service
         self.state = state
+        self.message_id_input = None
+        if state.form_type == "dispute":
+            self.message_id_input = discord.ui.TextInput(
+                label="Message ID",
+                placeholder="The ID of the message you are disputing",
+                required=True,
+                min_length=1,
+                max_length=100,
+            )
+            self.add_item(self.message_id_input)
         self.message_input = discord.ui.TextInput(
             label=fields["question"],
             placeholder=fields["placeholder"],
@@ -346,6 +376,8 @@ class MessageModal(discord.ui.Modal):
         # A deferred update of the step message: on success it becomes the confirmation with no
         # controls, so the form cannot be submitted twice; on a rejected choice it keeps its Back button.
         await interaction.response.defer()
+        if self.message_id_input is not None:
+            self.state.reference_message_id = str(self.message_id_input)
         try:
             row = await self.service.submit(interaction, self.state, str(self.message_input))
         except PermissionError as exc:
@@ -387,7 +419,7 @@ def _confirmation(row: dict) -> str:
             "You remain responsible for the shift until the request is approved or coverage is confirmed."
             f"{warning}"
         )
-    label = FORM_CONFIG["form_names"][row["form_type"]]
+    label = FORM_CONFIG["message_fields"][row["form_type"]]["title"]
     return f"{label} submitted.\nReference: {reference}{warning}"
 
 
@@ -497,10 +529,18 @@ def review_embed(row: dict) -> discord.Embed:
         embed.add_field(name=label, value=_datetime_label(row["start_time_et"]), inline=False)
     if row.get("end_time_et"):
         embed.add_field(name="End Time ET", value=_datetime_label(row["end_time_et"]), inline=False)
+    if row.get("reference_message_id"):
+        embed.add_field(name="Message ID", value=row["reference_message_id"], inline=False)
+    if row.get("start_date"):
+        embed.add_field(name="Start Date", value=_date_label(date.fromisoformat(row["start_date"])), inline=True)
+    if row.get("end_date"):
+        embed.add_field(name="End Date", value=_date_label(date.fromisoformat(row["end_date"])), inline=True)
     message_label = {
         "question": "Message",
         "concern": "Concern",
         "feedback": "Feedback",
+        "dispute": "Dispute Reasoning",
+        "working_location": "New Location",
     }.get(row["form_type"], "Reason")
     embed.add_field(name=message_label, value=row["message"][:1024], inline=False)
     embed.add_field(name="Submitted At", value=_datetime_label(row["submitted_at_et"]), inline=False)

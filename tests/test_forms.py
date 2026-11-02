@@ -111,7 +111,10 @@ class DatetimeTests(unittest.TestCase):
 class ValidationTests(unittest.TestCase):
     def test_menu_offers_when_i_work_and_one_combined_qs_and_feedback_form(self):
         options = select_of(TopLevelView(None, 1)).options
-        self.assertEqual([(o.label, o.value) for o in options], [("When I Work", "when_i_work"), ("Qs & Feedback", "question")])
+        self.assertEqual([(o.label, o.value) for o in options], [
+            ("When I Work", "when_i_work"), ("Qs & Feedback", "question"),
+            ("Disputes", "dispute"), ("Working Location", "working_location"),
+        ])
         modal = MessageModal(None, FormState(form_type="question", category="Pay"))
         self.assertEqual(modal.title, "Qs & Feedback")
         self.assertEqual(modal.message_input.label, "Ask anything")
@@ -210,6 +213,8 @@ class SubmissionIdTests(unittest.TestCase):
         self.assertEqual(submission_prefix("question", None), "Q")
         self.assertEqual(submission_prefix("concern", None), "C")
         self.assertEqual(submission_prefix("feedback", None), "F")
+        self.assertEqual(submission_prefix("dispute", None), "D")
+        self.assertEqual(submission_prefix("working_location", None), "WL")
 
     def test_ids_have_prefix_and_persist(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -378,6 +383,42 @@ class SubmitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["end_time_et"], "2026-07-15T10:30:00-04:00")
         self.assertEqual(row["adjustment_type"], "Missed clock-in")
 
+    async def test_dispute_requires_and_records_the_message_id(self):
+        with self.assertRaisesRegex(ValueError, "message ID is required"):
+            await self.service.submit(self.interaction(), FormState("dispute", reference_message_id="  "), "Wrong")
+        with self.assertRaisesRegex(ValueError, "message or reason is required"):
+            await self.service.submit(self.interaction(), FormState("dispute", reference_message_id="42"), " ")
+        with self.assertRaisesRegex(ValueError, "only valid for disputes"):
+            await self.service.submit(self.interaction(), FormState("question", category="Pay", reference_message_id="42"), "hi")
+        row = await self.service.submit(self.interaction(), FormState("dispute", reference_message_id=" 42 "), " Not mine ")
+        self.assertTrue(row["submission_id"].startswith("D-"))
+        self.assertEqual((row["reference_message_id"], row["message"], row["employee_email"]), ("42", "Not mine", "employee@example.com"))
+        values = sheet_values(row)
+        self.assertEqual(len(values), len(HEADERS["Disputes"]))
+        self.assertEqual(values[HEADERS["Disputes"].index("Message ID")], "42")
+        self.assertEqual(values[HEADERS["Disputes"].index("Agent Email")], "employee@example.com")
+
+    async def test_working_location_requires_ordered_dates_and_records_them(self):
+        state = FormState("working_location", start_date=date(2026, 11, 10))
+        with self.assertRaisesRegex(ValueError, "end date are required"):
+            await self.service.submit(self.interaction(), state, "Denver")
+        state.end_date = date(2026, 11, 9)
+        with self.assertRaisesRegex(ValueError, "on or after the start date"):
+            await self.service.submit(self.interaction(), state, "Denver")
+        state.end_date = date(2026, 11, 10)
+        with self.assertRaisesRegex(ValueError, "message or reason is required"):
+            await self.service.submit(self.interaction(), state, "  ")
+        row = await self.service.submit(self.interaction(), state, "Denver, CO")
+        self.assertTrue(row["submission_id"].startswith("WL-"))
+        self.assertEqual((row["start_date"], row["end_date"], row["message"]), ("2026-11-10", "2026-11-10", "Denver, CO"))
+        values = sheet_values(row)
+        headers = HEADERS["Working Location"]
+        self.assertEqual(len(values), len(headers))
+        self.assertEqual(
+            [values[headers.index(h)] for h in ("Agent Email", "Start Date", "End Date", "New Location")],
+            ["employee@example.com", "2026-11-10", "2026-11-10", "Denver, CO"],
+        )
+
     async def test_delivery_failures_are_alerted_and_reported_on_the_row(self):
         self.service.sync_one.side_effect = RuntimeError("sheets down")
         self.service.post_review.side_effect = RuntimeError("discord down")
@@ -488,6 +529,24 @@ class RosterNameTests(unittest.TestCase):
         self.assertEqual(full_name({}), "")
 
 
+class MigrationTests(unittest.TestCase):
+    def test_init_adds_the_new_columns_to_an_existing_table(self):
+        import sqlite3
+        from database.forms_repository import ADDED_COLUMNS, SCHEMA
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "forms.db"
+            old_schema = SCHEMA
+            for column in ADDED_COLUMNS:
+                old_schema = old_schema.replace(f"    {column} TEXT,\n", "")
+            with sqlite3.connect(path) as con:
+                con.executescript(old_schema)
+            repository = FormsRepository(path)
+            repository.init()
+            repository.init()  # idempotent
+            row, _ = repository.create(submission_values("migrated") | {"reference_message_id": "7"})
+            self.assertEqual(row["reference_message_id"], "7")
+
+
 class ConnectionTests(unittest.TestCase):
     def test_with_blocks_close_their_connection(self):
         import sqlite3
@@ -557,6 +616,30 @@ class BackButtonTests(unittest.IsolatedAsyncioTestCase):
             [TopLevelView, WhenIWorkView, DateRangeView, DateChoiceView, HourView],
         )
 
+    async def test_back_retraces_every_working_location_step(self):
+        today = datetime.now(EASTERN).date().isoformat()
+        screen, _ = await self.walk(["working_location", "0", today, "0"])
+        self.assertEqual(screen.view.target, "end")
+        await self.assert_back_retraces(
+            ["working_location", "0", today, "0"],
+            [TopLevelView, DateRangeView, DateChoiceView, DateRangeView, DateChoiceView],
+        )
+
+    async def test_working_location_opens_the_location_modal_after_the_end_date(self):
+        today = datetime.now(EASTERN).date().isoformat()
+        screen, _ = await self.walk(["working_location", "0", today, "0", today])
+        self.assertIsInstance(screen.modal, MessageModal)
+        self.assertEqual(screen.modal.message_input.label, "New Location")
+        self.assertIsNone(screen.modal.message_id_input)
+        self.assertEqual((screen.modal.state.start_date, screen.modal.state.end_date), (date.fromisoformat(today),) * 2)
+
+    async def test_dispute_opens_a_modal_with_both_required_fields(self):
+        screen, _ = await self.walk(["dispute"])
+        modal = screen.modal
+        self.assertIsInstance(modal, MessageModal)
+        self.assertEqual([(item.label, item.required) for item in modal.children],
+                         [("Message ID", True), ("Dispute Reasoning", True)])
+
     async def test_back_from_the_category_returns_to_the_form_types(self):
         await self.assert_back_retraces(["question"], [TopLevelView, CategoryView])
 
@@ -588,6 +671,17 @@ class ModalSubmitTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.defer.assert_awaited_once_with()
         interaction.edit_original_response.assert_awaited_once_with(content=_confirmation(row), view=None)
         interaction.followup.send.assert_not_awaited()
+
+    async def test_dispute_submit_passes_the_message_id(self):
+        row = {"submission_id": "D-20261102-0001", "form_type": "dispute", "form_subtype": None}
+        service = SimpleNamespace(submit=AsyncMock(return_value=row))
+        modal = MessageModal(service, FormState(form_type="dispute"))
+        modal.message_id_input._value = "98765"
+        modal.message_input._value = "Not my message"
+        await modal.on_submit(self.interaction())
+        state, message = service.submit.await_args.args[1:]
+        self.assertEqual((state.reference_message_id, message), ("98765", "Not my message"))
+        self.assertEqual(_confirmation(row), "Dispute submitted.\nReference: D-20261102-0001")
 
     async def test_a_rejected_choice_keeps_the_step_and_its_back_button(self):
         service = SimpleNamespace(submit=AsyncMock(side_effect=ValueError("End time must be after start time.")))

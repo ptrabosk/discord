@@ -25,6 +25,16 @@ HEADERS = {
         "Agent Email", "Agent Name", "Type", "Category", "Message", "Status",
         "Reviewed By", "Reviewed At ET", "Reviewed At UTC",
     ],
+    "Disputes": [
+        "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
+        "Agent Email", "Agent Name", "Status", "Message ID", "Dispute Reasoning",
+        "Reviewed By", "Reviewed At ET", "Reviewed At UTC",
+    ],
+    "Working Location": [
+        "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
+        "Agent Email", "Agent Name", "Status", "Start Date", "End Date", "New Location",
+        "Reviewed By", "Reviewed At ET", "Reviewed At UTC",
+    ],
 }
 
 
@@ -55,6 +65,13 @@ def sheet_values(row: dict) -> list:
             row["message"], _reviewed_by(row), row.get("reviewed_at_et") or "",
             row.get("reviewed_at_utc") or "",
         ]
+    reviewed = [_reviewed_by(row), row.get("reviewed_at_et") or "", row.get("reviewed_at_utc") or ""]
+    if tab == "Disputes":
+        return common + [row["status"], row.get("reference_message_id") or "", row["message"]] + reviewed
+    if tab == "Working Location":
+        return common + [
+            row["status"], row.get("start_date") or "", row.get("end_date") or "", row["message"],
+        ] + reviewed
     return common + [
         row["form_type"].title(), row.get("category") or "", row["message"], row["status"],
         _reviewed_by(row), row.get("reviewed_at_et") or "", row.get("reviewed_at_utc") or "",

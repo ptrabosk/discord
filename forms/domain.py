@@ -16,6 +16,7 @@ DEFAULT_PROMPTS = {
     "adjustment_type": "Choose the adjustment type.",
     "start_date_range": "Choose the shift date range.",
     "start_date": "Choose the start date.",
+    "end_date": "Choose the end date.",
     "start_hour": "Choose the start time.",
     "end_hour": "Choose the end hour.",
     "start_minute": "Choose the start minutes.",
@@ -26,14 +27,14 @@ DEFAULT_PROMPTS = {
 def load_form_config(path: Path = CONFIG_PATH) -> dict:
     """Load editable copy and choices while keeping stored form IDs stable."""
     config = json.loads(path.read_text(encoding="utf-8"))
-    expected_names = {"when_i_work", "question", "concern", "feedback"}
+    expected_names = {"when_i_work", "question", "concern", "feedback", "dispute", "working_location"}
     expected_wiw = {"timesheet_adjustment", "emergency_shift_release"}
     if set(config["form_names"]) != expected_names:
-        raise ValueError("forms.json form_names must keep the four existing IDs")
+        raise ValueError("forms.json form_names must keep the six existing IDs")
     if set(config["when_i_work_names"]) != expected_wiw:
         raise ValueError("forms.json when_i_work_names must keep the two existing IDs")
     if set(config["message_fields"]) != (expected_names - {"when_i_work"}) | expected_wiw:
-        raise ValueError("forms.json message_fields must keep the five existing IDs")
+        raise ValueError("forms.json message_fields must keep the seven existing IDs")
     if not set(config["prompts"]) <= set(DEFAULT_PROMPTS) or any(
         not isinstance(value, str) or not 1 <= len(value) <= 500
         for value in config["prompts"].values()
@@ -78,6 +79,8 @@ FORM_TABS = {
     ("question", None): "Questions Concerns Feedback",
     ("concern", None): "Questions Concerns Feedback",
     ("feedback", None): "Questions Concerns Feedback",
+    ("dispute", None): "Disputes",
+    ("working_location", None): "Working Location",
 }
 
 ACTION_STATUSES = {
@@ -106,6 +109,16 @@ ACTION_STATUSES = {
         "follow_up": "Follow-up Required",
         "close": "Closed",
     },
+    ("dispute", None): {
+        "approve": "Approved",
+        "reject": "Rejected",
+        "need_info": "Needs Information",
+    },
+    ("working_location", None): {
+        "approve": "Approved",
+        "reject": "Rejected",
+        "need_info": "Needs Information",
+    },
 }
 
 FINAL_STATUSES = {"Approved", "Rejected", "Answered", "Reviewed", "Closed"}
@@ -119,6 +132,8 @@ class FormState:
     category: str | None = None
     adjustment_type: str | None = None
     start_date: date | None = None
+    end_date: date | None = None
+    reference_message_id: str | None = None
     start_hour: int | None = None
     start_minute: int | None = None
     end_hour: int | None = None
@@ -180,6 +195,14 @@ def form_datetimes(state: FormState) -> tuple[datetime, datetime, datetime | Non
     return start_et, start_utc, None, None
 
 
+def working_location_dates(state: FormState) -> tuple[date, date]:
+    if state.start_date is None or state.end_date is None:
+        raise ValueError("A start date and an end date are required.")
+    if state.end_date < state.start_date:
+        raise ValueError("End date must be on or after the start date.")
+    return state.start_date, state.end_date
+
+
 def submission_prefix(form_type: str, form_subtype: str | None) -> str:
     prefixes = {
         ("when_i_work", "timesheet_adjustment"): "WIW-TA",
@@ -187,6 +210,8 @@ def submission_prefix(form_type: str, form_subtype: str | None) -> str:
         ("question", None): "Q",
         ("concern", None): "C",
         ("feedback", None): "F",
+        ("dispute", None): "D",
+        ("working_location", None): "WL",
     }
     try:
         return prefixes[(form_type, form_subtype)]

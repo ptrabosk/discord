@@ -3,7 +3,9 @@
     "when_i_work": "When I Work",
     "question": "Qs & Feedback",
     "concern": "Concern",
-    "feedback": "Feedback"
+    "feedback": "Feedback",
+    "dispute": "Disputes",
+    "working_location": "Working Location"
   },
   "when_i_work_names": {
     "timesheet_adjustment": "Timesheet Adjustment",
@@ -34,7 +36,8 @@
     "adjustment_type": "Adjustment type",
     "start_date": "Start date",
     "start_hour": "Start time",
-    "end_hour": "End hour"
+    "end_hour": "End hour",
+    "end_date": "End date"
   },
   "message_fields": {
     "timesheet_adjustment": {
@@ -61,6 +64,16 @@
       "title": "Feedback",
       "question": "Feedback",
       "placeholder": "Type your feedback"
+    },
+    "dispute": {
+      "title": "Dispute",
+      "question": "Dispute Reasoning",
+      "placeholder": "Explain why you are disputing this message"
+    },
+    "working_location": {
+      "title": "Working Location",
+      "question": "New Location",
+      "placeholder": "Where you will be working from"
     }
   }
 }

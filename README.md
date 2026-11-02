@@ -118,6 +118,11 @@ The bot creates missing forms tabs when permitted. Existing tabs must have these
 - `Questions Concerns Feedback`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
   Agent Email, Agent Name, Type, Category, Message, Status, Reviewed By, Reviewed At ET,
   Reviewed At UTC
+- `Disputes`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID, Agent Email,
+  Agent Name, Status, Message ID, Dispute Reasoning, Reviewed By, Reviewed At ET, Reviewed At UTC
+- `Working Location`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
+  Agent Email, Agent Name, Status, Start Date, End Date, New Location, Reviewed By,
+  Reviewed At ET, Reviewed At UTC
 
 Configure private Discord review channels by numeric ID:
 
@@ -125,6 +130,8 @@ Configure private Discord review channels by numeric ID:
 - `QUESTION_REVIEW_CHANNEL_ID`
 - `CONCERN_REVIEW_CHANNEL_ID`
 - `FEEDBACK_REVIEW_CHANNEL_ID`
+- `DISPUTE_REVIEW_CHANNEL_ID`
+- `WORKING_LOCATION_REVIEW_CHANNEL_ID`
 
 The three general form types may use the same channel ID. The bot refuses to post agent data to
 a channel visible to `@everyone`. Set `FORM_ERROR_CHANNEL_ID` to a private operations channel for
@@ -140,6 +147,10 @@ time. Emergency Shift Releases keep the range-then-date picker, configurable wit
 selected from `start_hours` in `config/forms.json`, with minutes fixed at `:00`; end times are
 selected by hour and then `00`, `15`, `30`, or `45`. Local datetimes use `America/New_York` and are
 stored in both ET and UTC.
+
+Disputes open one modal with a required Message ID and Dispute Reasoning. Working Location uses the
+same range-then-date picker for its start and end dates (end on or after start), then a modal for
+the free-text New Location; its dates are stored as plain `YYYY-MM-DD` dates.
 
 SQLite is the durable source of truth. A submission succeeds once it is stored locally. Sheets
 sync retries every `FORM_SHEETS_RETRY_MINUTES` and searches column A for the Submission ID before

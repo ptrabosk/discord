@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import discord
 from discord.ext import tasks
@@ -20,6 +20,7 @@ from forms.domain import (
     sheet_tab_for,
     status_for_action,
     validate_category,
+    working_location_dates,
 )
 from integrations.forms_sheets import FormsSheet
 from integrations.google_sheets import full_name, truthy
@@ -31,6 +32,8 @@ REVIEW_CHANNEL_ENV = {
     "question": "QUESTION_REVIEW_CHANNEL_ID",
     "concern": "CONCERN_REVIEW_CHANNEL_ID",
     "feedback": "FEEDBACK_REVIEW_CHANNEL_ID",
+    "dispute": "DISPUTE_REVIEW_CHANNEL_ID",
+    "working_location": "WORKING_LOCATION_REVIEW_CHANNEL_ID",
 }
 DEFAULT_FORM_ERROR_CHANNEL_ID = 1550994656966344714
 
@@ -47,9 +50,16 @@ def validate_submission(state: FormState, message: str) -> None:
             raise ValueError("A valid adjustment type is required.")
     elif state.adjustment_type is not None:
         raise ValueError("Adjustment type is only valid for timesheet adjustments.")
+    if state.form_type == "dispute":
+        if not (state.reference_message_id or "").strip():
+            raise ValueError("A message ID is required.")
+    elif state.reference_message_id is not None:
+        raise ValueError("Message ID is only valid for disputes.")
+    if state.form_type == "working_location":
+        working_location_dates(state)
 
 
-def _iso(value: datetime | None) -> str | None:
+def _iso(value: date | datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
@@ -62,9 +72,11 @@ def submission_values(
     submitted_utc: datetime,
 ) -> dict:
     """The form_submissions row for a validated form; When I Work forms carry their start and end times."""
-    start_et = start_utc = end_et = end_utc = None
+    start_et = start_utc = end_et = end_utc = start_day = end_day = None
     if state.form_type == "when_i_work":
         start_et, start_utc, end_et, end_utc = form_datetimes(state)
+    if state.form_type == "working_location":
+        start_day, end_day = working_location_dates(state)
     return {
         "interaction_id": str(interaction.id),
         "form_type": state.form_type,
@@ -82,6 +94,9 @@ def submission_values(
         "start_time_utc": _iso(start_utc),
         "end_time_et": _iso(end_et),
         "end_time_utc": _iso(end_utc),
+        "start_date": _iso(start_day),
+        "end_date": _iso(end_day),
+        "reference_message_id": (state.reference_message_id or "").strip() or None,
         "message": message.strip(),
     }
 
