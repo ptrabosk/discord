@@ -69,7 +69,8 @@ the lead who receives that agent's reachout notifications. A lead's own row gets
 own email being listed in `team_leads`; leave their Team Lead Email blank if they have none. Leave it blank for
 Leadership. Rosters that still have a `Concierge Team` column keep working until it is renamed.
 
-`QA` grants the QA role and the QA category (`qa-announcements`, `qa-questions`, `qa-resources`).
+`QA` grants the QA role and the QA category (`qa-announcements`, `qa-questions`, `qa-resources`),
+plus every CONCIERGE channel listed in `config/server_structure.json` (`also_roles`).
 
 Share the access-roster Sheet with the service-account email from `credentials.json` as Viewer.
 
@@ -148,9 +149,9 @@ selected from `start_hours` in `config/forms.json`, with minutes fixed at `:00`;
 selected by hour and then `00`, `15`, `30`, or `45`. Local datetimes use `America/New_York` and are
 stored in both ET and UTC.
 
-Disputes open one modal with a required Message ID and Dispute Reasoning. Working Location uses the
-same range-then-date picker for its start and end dates (end on or after start), then a modal for
-the free-text New Location; its dates are stored as plain `YYYY-MM-DD` dates.
+Disputes open one modal with a required Message ID and Dispute Reasoning. Working Location opens
+one modal with required Start Date, End Date, and New Location. Discord modals have no date input,
+so both dates are free text (the placeholder suggests `MM/DD/YYYY`) and are stored as typed.
 
 SQLite is the durable source of truth. A submission succeeds once it is stored locally. Sheets
 sync retries every `FORM_SHEETS_RETRY_MINUTES` and searches column A for the Submission ID before

@@ -16,7 +16,6 @@ DEFAULT_PROMPTS = {
     "adjustment_type": "Choose the adjustment type.",
     "start_date_range": "Choose the shift date range.",
     "start_date": "Choose the start date.",
-    "end_date": "Choose the end date.",
     "start_hour": "Choose the start time.",
     "end_hour": "Choose the end hour.",
     "start_minute": "Choose the start minutes.",
@@ -132,8 +131,10 @@ class FormState:
     category: str | None = None
     adjustment_type: str | None = None
     start_date: date | None = None
-    end_date: date | None = None
     reference_message_id: str | None = None
+    # Working Location dates are free text: Discord modals have no date input.
+    location_start: str | None = None
+    location_end: str | None = None
     start_hour: int | None = None
     start_minute: int | None = None
     end_hour: int | None = None
@@ -195,12 +196,11 @@ def form_datetimes(state: FormState) -> tuple[datetime, datetime, datetime | Non
     return start_et, start_utc, None, None
 
 
-def working_location_dates(state: FormState) -> tuple[date, date]:
-    if state.start_date is None or state.end_date is None:
+def working_location_dates(state: FormState) -> tuple[str, str]:
+    start, end = (state.location_start or "").strip(), (state.location_end or "").strip()
+    if not start or not end:
         raise ValueError("A start date and an end date are required.")
-    if state.end_date < state.start_date:
-        raise ValueError("End date must be on or after the start date.")
-    return state.start_date, state.end_date
+    return start, end
 
 
 def submission_prefix(form_type: str, form_subtype: str | None) -> str:

@@ -36,8 +36,7 @@
     "adjustment_type": "Adjustment type",
     "start_date": "Start date",
     "start_hour": "Start time",
-    "end_hour": "End hour",
-    "end_date": "End date"
+    "end_hour": "End hour"
   },
   "message_fields": {
     "timesheet_adjustment": {

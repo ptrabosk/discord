@@ -34,6 +34,11 @@ async def run_setup(guild):
             overwrites[category_role] = discord.PermissionOverwrite(
                 view_channel=True, send_messages=True, read_message_history=True
             )
+        # Extra roles that see the whole category, subteam channels included.
+        for extra in item.get("also_roles", []):
+            overwrites[role_map[extra]] = discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True
+            )
 
         if not category:
             category = await guild.create_category(

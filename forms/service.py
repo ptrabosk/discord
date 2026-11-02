@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import discord
 from discord.ext import tasks
@@ -59,7 +59,7 @@ def validate_submission(state: FormState, message: str) -> None:
         working_location_dates(state)
 
 
-def _iso(value: date | datetime | None) -> str | None:
+def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
@@ -94,8 +94,8 @@ def submission_values(
         "start_time_utc": _iso(start_utc),
         "end_time_et": _iso(end_et),
         "end_time_utc": _iso(end_utc),
-        "start_date": _iso(start_day),
-        "end_date": _iso(end_day),
+        "start_date": start_day,
+        "end_date": end_day,
         "reference_message_id": (state.reference_message_id or "").strip() or None,
         "message": message.strip(),
     }

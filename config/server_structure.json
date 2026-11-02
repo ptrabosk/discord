@@ -121,6 +121,7 @@
     {
       "name": "CONCIERGE",
       "role": "Concierge",
+      "also_roles": ["QA"],
       "channels": [
         {
           "name": "concierge-announcements"
