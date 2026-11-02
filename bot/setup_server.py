@@ -11,6 +11,17 @@ async def ensure_role(guild, name):
         role = await guild.create_role(name=name, reason="Ops Bot server setup")
     return role
 
+FULL = dict(view_channel=True, send_messages=True, read_message_history=True)
+
+
+def add_role_access(overwrites, role_map, cfg):
+    """`roles` get full access and `view_roles` view-only access, on a category or a channel."""
+    for name in cfg.get("roles", []):
+        overwrites[role_map[name]] = discord.PermissionOverwrite(**FULL)
+    for name in cfg.get("view_roles", []):
+        overwrites[role_map[name]] = discord.PermissionOverwrite(view_channel=True)
+
+
 async def run_setup(guild):
     role_map = {}
     for role_name in CONFIG["roles"]:
@@ -23,13 +34,17 @@ async def run_setup(guild):
         public = item.get("public", False)
         category_role = role_map.get(item.get("role"))
 
+        # `post_roles` makes a public category read-only for everyone else.
+        post_roles = item.get("post_roles", [])
         overwrites = {
             everyone: discord.PermissionOverwrite(
                 view_channel=True if public else False,
-                send_messages=True if public else None,
+                send_messages=(not post_roles) if public else None,
                 read_message_history=True if public else None
             )
         }
+        for name in post_roles:
+            overwrites[role_map[name]] = discord.PermissionOverwrite(**FULL)
         if category_role:
             overwrites[category_role] = discord.PermissionOverwrite(
                 view_channel=True, send_messages=True, read_message_history=True
@@ -39,6 +54,7 @@ async def run_setup(guild):
             overwrites[role_map[extra]] = discord.PermissionOverwrite(
                 view_channel=True, send_messages=True, read_message_history=True
             )
+        add_role_access(overwrites, role_map, item)
 
         if not category:
             category = await guild.create_category(
@@ -51,8 +67,12 @@ async def run_setup(guild):
             name = ch_cfg["name"]
             channel = discord.utils.get(category.text_channels, name=name)
 
-            # Channel permissions start from category permissions.
-            channel_overwrites = dict(overwrites)
+            # Channel permissions start from category permissions; a `private` channel starts hidden instead.
+            if ch_cfg.get("private"):
+                channel_overwrites = {everyone: discord.PermissionOverwrite(view_channel=False)}
+            else:
+                channel_overwrites = dict(overwrites)
+            add_role_access(channel_overwrites, role_map, ch_cfg)
 
             # Public channel override, e.g. WORKFLOWS/main.
             if ch_cfg.get("public"):

@@ -449,7 +449,7 @@ class ReviewDmTests(SubmitTests.__base__):
         self.row = await self.service.submit(SubmitTests.interaction(self), FormState("question", category="Pay"), "hi")
         self.service.repository.set_review_message(self.row["submission_id"], 77, 555)
         self.audit.reset_mock()
-        patch("forms.service.is_admin", side_effect=lambda interaction: interaction.user.id != 999).start()
+        patch("forms.service.can_review", side_effect=lambda interaction: interaction.user.id != 999).start()
 
     def reviewer(self, user_id=456, message_id=555):
         response = SimpleNamespace(send_message=AsyncMock())

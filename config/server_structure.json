@@ -13,7 +13,8 @@
     "Workflows",
     "Leadership",
     "QA",
-    "Ops Bot Admin"
+    "Ops Bot Admin",
+    "Moderator"
   ],
   "categories": [
     {
@@ -22,6 +23,17 @@
       "channels": [
         {
           "name": "initial-setup"
+        }
+      ]
+    },
+    {
+      "name": "BOT",
+      "view_roles": ["Ops Bot Admin", "Moderator"],
+      "channels": [
+        {
+          "name": "errors",
+          "private": true,
+          "view_roles": ["Ops Bot Admin"]
         }
       ]
     },
@@ -41,7 +53,8 @@
         {
           "name": "help"
         }
-      ]
+      ],
+      "post_roles": ["Leadership", "Workflows"]
     },
     {
       "name": "PROFESSIONAL SERVICES",
@@ -137,6 +150,11 @@
         {
           "name": "team-thaniel",
           "role": "Concierge - Thaniel"
+        },
+        {
+          "name": "shift-releases",
+          "private": true,
+          "view_roles": ["Concierge", "Concierge - Josh", "Concierge - Thaniel", "Leadership", "Moderator", "Ops Bot Admin"]
         }
       ]
     },
@@ -153,6 +171,15 @@
         },
         {
           "name": "surveys"
+        },
+        {
+          "name": "qa-disputes",
+          "roles": ["QA"],
+          "view_roles": ["Leadership", "Ops Bot Admin"]
+        },
+        {
+          "name": "location-change",
+          "view_roles": ["Leadership", "Ops Bot Admin"]
         }
       ]
     },
@@ -206,6 +233,11 @@
           "name": "meme-department"
         }
       ]
+    },
+    {
+      "name": "REACHOUTS",
+      "view_roles": ["Leadership", "Ops Bot Admin"],
+      "channels": []
     }
   ]
 }

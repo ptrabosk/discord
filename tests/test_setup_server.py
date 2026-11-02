@@ -46,6 +46,41 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(can_view("CONCIERGE/team-nadir", "Concierge"))
         self.assertFalse(can_view("WHITE GLOVE/wg-questions", "QA"))
 
+    async def test_hand_built_channels_and_read_only_operations(self):
+        guild = FakeGuild()
+        await run_setup(guild)
+
+        def access(key, role_name):
+            ow = next((ow for role, ow in guild.overwrites[key].items() if role.name == role_name), None)
+            return ow and (ow.view_channel, ow.send_messages)
+
+        self.assertEqual(access("OPERATIONS/announcements", "@everyone"), (True, False))
+        self.assertEqual(access("OPERATIONS/announcements", "Leadership"), (True, True))
+        self.assertEqual(access("OPERATIONS/announcements", "Workflows"), (True, True))
+        self.assertEqual(access("WORKFLOWS/main", "Workflows"), (True, True))
+        # shift-releases ignores the CONCIERGE category, so QA does not inherit it.
+        self.assertEqual(access("CONCIERGE/shift-releases", "Concierge"), (True, None))
+        self.assertIsNone(access("CONCIERGE/shift-releases", "QA"))
+        self.assertEqual(access("WORKFLOWS/qa-disputes", "QA"), (True, True))
+        self.assertEqual(access("WORKFLOWS/qa-disputes", "Leadership"), (True, None))
+        self.assertEqual(access("BOT/errors", "@everyone"), (False, None))
+        self.assertIsNone(access("BOT/errors", "Moderator"))
+
+
+class ReviewerTests(unittest.TestCase):
+    def test_leadership_and_admins_can_review_but_others_cannot(self):
+        from bot.permissions import can_review
+
+        def member(*roles, admin=False):
+            return SimpleNamespace(user=SimpleNamespace(
+                roles=[SimpleNamespace(name=r) for r in roles],
+                guild_permissions=SimpleNamespace(administrator=admin)))
+
+        self.assertTrue(can_review(member("Leadership")))
+        self.assertTrue(can_review(member("Ops Bot Admin")))
+        self.assertTrue(can_review(member(admin=True)))
+        self.assertFalse(can_review(member("QA", "Workflows")))
+
 
 if __name__ == "__main__":
     unittest.main()

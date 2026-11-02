@@ -6,7 +6,9 @@ Creates and manages the Discord operations server structure, controlled agent on
 
 - SETUP — public
   - initial-setup
-- OPERATIONS — public
+- BOT — Ops Bot Admin and Moderator
+  - errors — Ops Bot Admin only
+- OPERATIONS — public to read; only Leadership and Workflows post
   - announcements
   - general
   - schedules
@@ -36,10 +38,13 @@ Creates and manages the Discord operations server structure, controlled agent on
   - team-nadir
   - team-josh
   - team-thaniel
+  - shift-releases — all Concierge, Leadership, Moderator, Ops Bot Admin (QA excluded)
 - WORKFLOWS — role locked
   - main — public override
   - wiw-adjustments
   - surveys
+  - qa-disputes — plus QA; Leadership and Ops Bot Admin view
+  - location-change — plus Leadership and Ops Bot Admin view
 - QA — role locked
   - qa-announcements
   - qa-questions
@@ -54,6 +59,12 @@ Creates and manages the Discord operations server structure, controlled agent on
   - chat
   - pets
   - meme-department
+- REACHOUTS — Leadership and Ops Bot Admin; per-agent channels are managed by the reachouts module
+
+`config/server_structure.json` options: `public`, `role` (full access), `also_roles` (full access to
+the whole category, team channels included), `roles` / `view_roles` (extra full or view-only access),
+`post_roles` (on a public category: only these roles post), and `private` (a channel that ignores
+its category's permissions).
 
 ## Google Sheet
 
@@ -129,12 +140,10 @@ Configure private Discord review channels by numeric ID:
 
 - `WIW_REVIEW_CHANNEL_ID`
 - `QUESTION_REVIEW_CHANNEL_ID`
-- `CONCERN_REVIEW_CHANNEL_ID`
-- `FEEDBACK_REVIEW_CHANNEL_ID`
 - `DISPUTE_REVIEW_CHANNEL_ID`
 - `WORKING_LOCATION_REVIEW_CHANNEL_ID`
 
-The three general form types may use the same channel ID. The bot refuses to post agent data to
+Concern and Feedback are retired and no longer need a channel. Form types may share a channel ID. The bot refuses to post agent data to
 a channel visible to `@everyone`. Set `FORM_ERROR_CHANNEL_ID` to a private operations channel for
 technical form errors; it defaults to `1550994656966344714`. Error alerts contain only an event
 type and reference, not agent messages or credentials. An agent is told about delivery trouble

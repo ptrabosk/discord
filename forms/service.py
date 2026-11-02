@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import tasks
 
-from bot.permissions import is_admin
+from bot.permissions import can_review
 from database.database import audit, get_verified_user
 from database.forms_repository import FormsRepository
 from forms.domain import (
@@ -261,7 +261,7 @@ class FormsService:
         )
 
     async def review(self, interaction: discord.Interaction, action: str):
-        if interaction.guild_id != self.bot.guild_id or not is_admin(interaction):
+        if interaction.guild_id != self.bot.guild_id or not can_review(interaction):
             await interaction.response.send_message("Not authorized to review forms.", ephemeral=True)
             return
         row = self.repository.get_by_review_message(interaction.message.id)
@@ -324,7 +324,7 @@ class FormsService:
 
     async def dm_target(self, interaction: discord.Interaction) -> dict | None:
         """The Qs & Feedback submission behind a review card, if this reviewer may message its submitter."""
-        if interaction.guild_id != self.bot.guild_id or not is_admin(interaction):
+        if interaction.guild_id != self.bot.guild_id or not can_review(interaction):
             await interaction.response.send_message("Not authorized to review forms.", ephemeral=True)
             return None
         row = self.repository.get_by_review_message(interaction.message.id)
@@ -337,7 +337,7 @@ class FormsService:
         return row
 
     async def send_dm(self, interaction: discord.Interaction, submission_id: str, text: str):
-        if interaction.guild_id != self.bot.guild_id or not is_admin(interaction):
+        if interaction.guild_id != self.bot.guild_id or not can_review(interaction):
             await interaction.followup.send("Not authorized to review forms.", ephemeral=True)
             return
         row = self.repository.get(submission_id)

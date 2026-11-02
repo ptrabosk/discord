@@ -20,6 +20,10 @@ def is_admin(interaction):
         or any(role.name == "Ops Bot Admin" for role in interaction.user.roles)
     )
 
+def can_review(interaction):
+    """Form reviewers: bot admins plus Leadership."""
+    return is_admin(interaction) or any(role.name == "Leadership" for role in interaction.user.roles)
+
 def desired_roles(record):
     if not record or not truthy(record.get("Active")):
         return set()
