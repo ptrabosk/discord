@@ -23,7 +23,7 @@ from forms.domain import (
     working_location_dates,
 )
 from integrations.forms_sheets import FormsSheet
-from integrations.google_sheets import full_name, truthy
+from integrations.google_sheets import field, full_name, truthy
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +37,10 @@ REVIEW_CHANNEL_ENV = {
 }
 DEFAULT_FORM_ERROR_CHANNEL_ID = 1550994656966344714
 
+
+
+def is_timesheet(row: dict) -> bool:
+    return row["form_type"] == "when_i_work" and row.get("form_subtype") == "timesheet_adjustment"
 
 
 def validate_submission(state: FormState, message: str) -> None:
@@ -70,6 +74,7 @@ def submission_values(
     email: str,
     employee_name: str,
     submitted_utc: datetime,
+    concierge_email: str | None = None,
 ) -> dict:
     """The form_submissions row for a validated form; When I Work forms carry their start and end times."""
     start_et = start_utc = end_et = end_utc = start_day = end_day = None
@@ -86,6 +91,7 @@ def submission_values(
         "discord_display_name": interaction.user.display_name,
         "employee_email": email,
         "employee_name": employee_name,
+        "concierge_email": concierge_email,
         "submitted_at_utc": submitted_utc.isoformat(),
         "submitted_at_et": submitted_utc.astimezone(EASTERN).isoformat(),
         "category": state.category,
@@ -140,7 +146,7 @@ class FormsService:
         row = get_verified_user(user_id)
         return row[1] if row else None
 
-    async def employee_identity(self, user_id: int) -> tuple[str, str]:
+    async def employee_identity(self, user_id: int) -> tuple[str, str, str | None]:
         email = self.verified_email(user_id)
         if not email:
             raise PermissionError("Complete work-email verification before submitting a form.")
@@ -150,14 +156,16 @@ class FormsService:
         name = full_name(record)
         if not name:
             raise ValueError("Your agent record is missing a name. Contact Operations.")
-        return email, name
+        return email, name, field(record, "Concierge Email") or None
 
     async def submit(self, interaction: discord.Interaction, state: FormState, message: str) -> dict:
         if interaction.guild_id != self.bot.guild_id:
             raise PermissionError("Forms can only be submitted in the authorized server.")
-        email, employee_name = await self.employee_identity(interaction.user.id)
+        email, employee_name, concierge_email = await self.employee_identity(interaction.user.id)
         validate_submission(state, message)
-        values = submission_values(interaction, state, message, email, employee_name, datetime.now(timezone.utc))
+        values = submission_values(
+            interaction, state, message, email, employee_name, datetime.now(timezone.utc), concierge_email,
+        )
         async with self._submission_lock:
             row, created = self.repository.create(values)
             if created:
@@ -278,6 +286,11 @@ class FormsService:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
 
+        if is_timesheet(row) and action == "reject":
+            from forms.views import TimesheetRejectModal
+            await interaction.response.send_modal(TimesheetRejectModal(self, row["submission_id"], interaction.message))
+            return
+
         await interaction.response.defer(ephemeral=True, thinking=True)
         async with self._review_lock:
             row = self.repository.get(row["submission_id"])
@@ -318,9 +331,71 @@ class FormsService:
 
         if new_status == "Needs Information":
             await self._notify_submitter(row)
+        if is_timesheet(row) and new_status == "Approved":
+            from forms.views import _datetime_label
+            await self._dm_requester(
+                row,
+                f"Your timesheet adjustment request for {_datetime_label(row['start_time_et'])} has been approved!",
+            )
         await interaction.followup.send(
             f"{row['submission_id']} updated to {new_status}.", ephemeral=True
         )
+
+    async def reject_timesheet(self, interaction: discord.Interaction, submission_id: str, reason: str,
+                               review_message: discord.Message):
+        """Reject a timesheet adjustment with a reason: DM the requester and add the same message to the card's thread."""
+        if interaction.guild_id != self.bot.guild_id or not can_review(interaction):
+            await interaction.followup.send("Not authorized to review forms.", ephemeral=True)
+            return
+        if not reason:
+            await interaction.followup.send("A reason is required.", ephemeral=True)
+            return
+        async with self._review_lock:
+            row = self.repository.get(submission_id)
+            if row["status"] in FINAL_STATUSES:
+                await interaction.followup.send("This submission is already complete.", ephemeral=True)
+                return
+            reviewer = get_verified_user(interaction.user.id)
+            reviewed_utc = datetime.now(timezone.utc)
+            reviewed_et = reviewed_utc.astimezone(EASTERN)
+            row = self.repository.review(
+                submission_id, "Rejected", interaction.user.id,
+                reviewer[1] if reviewer else None,
+                reviewed_utc.isoformat(), reviewed_et.isoformat(),
+            )
+            audit(
+                row["discord_user_id"], row["employee_email"], "FORM_STATUS_CHANGED",
+                f"Submission={submission_id}; Reviewer={interaction.user.id}; Status=Rejected",
+            )
+        await self.sync_one(row)
+
+        from forms.views import ReviewView, review_embed
+        try:
+            await review_message.edit(embed=review_embed(row), view=ReviewView(self, row["form_type"], row["form_subtype"], disabled=True))
+        except discord.HTTPException as exc:
+            log.exception("Could not update review message for %s", submission_id)
+            await self.alert_error("discord_review_update_failed", row=row, error=exc)
+
+        text = f"Please submit a new Timesheet Adjustment. Reason: {reason}"
+        await self._dm_requester(row, text)
+        try:
+            thread = review_message.thread or await review_message.create_thread(name=f"{submission_id} rejected"[:100])
+            await thread.send(text, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as exc:
+            log.exception("Could not post the rejection to the thread for %s", submission_id)
+            await self.alert_error("discord_review_thread_failed", row=row, error=exc)
+        await interaction.followup.send(f"{submission_id} rejected and the requester was notified.", ephemeral=True)
+
+    async def _dm_requester(self, row: dict, text: str) -> bool:
+        try:
+            user = self.bot.get_user(row["discord_user_id"]) or await self.bot.fetch_user(row["discord_user_id"])
+            await user.send(text, allowed_mentions=discord.AllowedMentions.none())
+            audit(row["discord_user_id"], row["employee_email"], "FORM_DM_SENT", f"Submission={row['submission_id']}")
+            return True
+        except (discord.Forbidden, discord.HTTPException):
+            log.warning("Could not DM requester for %s", row["submission_id"])
+            audit(row["discord_user_id"], row["employee_email"], "FORM_DM_FAILED", f"Submission={row['submission_id']}")
+            return False
 
     async def dm_target(self, interaction: discord.Interaction) -> dict | None:
         """The Qs & Feedback submission behind a review card, if this reviewer may message its submitter."""

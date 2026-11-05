@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_form_submissions_sheets_sync
 ON form_submissions(sheets_sync_status, id);
 """
 # Columns added after the table first shipped; init() adds any an older database lacks.
-ADDED_COLUMNS = ("start_date", "end_date", "reference_message_id")
+ADDED_COLUMNS = ("start_date", "end_date", "reference_message_id", "concierge_email")
 
 
 class FormsRepository:
@@ -79,7 +79,7 @@ class FormsRepository:
             "discord_username", "discord_display_name", "employee_email", "employee_name",
             "submitted_at_utc", "submitted_at_et", "category", "adjustment_type",
             "start_time_et", "start_time_utc", "end_time_et", "end_time_utc",
-            "start_date", "end_date", "reference_message_id", "message",
+            "start_date", "end_date", "reference_message_id", "message", "concierge_email",
         )
         try:
             with self.connect() as con:

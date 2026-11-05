@@ -1,6 +1,7 @@
 import os
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -25,6 +26,27 @@ class AccessSheet:
             if str(row.get("Email", "")).strip().lower() == email:
                 return row
         return None
+
+    def mark_verified(self, email):
+        """Set the Verified column to TRUE on the row for this email."""
+        return self.mark_verified_many([email]) == 1
+
+    def mark_verified_many(self, emails, value="TRUE"):
+        """Set the Verified column to TRUE (or FALSE) for these emails in one batch; returns how many rows matched."""
+        worksheet = self._worksheet()
+        values = worksheet.get_all_values()
+        headers = [str(h).strip() for h in values[0]]
+        email_column = headers.index("Email")
+        verified_column = headers.index("Verified")
+        wanted = {email.strip().lower() for email in emails}
+        updates = [
+            {"range": rowcol_to_a1(row_number, verified_column + 1), "values": [[value]]}
+            for row_number, row in enumerate(values[1:], start=2)
+            if len(row) > email_column and row[email_column].strip().lower() in wanted
+        ]
+        if updates:
+            worksheet.batch_update(updates, value_input_option="USER_ENTERED")
+        return len(updates)
 
 def field(record, name):
     """A roster value by header, ignoring capitalization and spacing ("Team Lead email" == "Team Lead Email")."""

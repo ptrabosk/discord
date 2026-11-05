@@ -11,11 +11,13 @@ from forms.domain import (
     ADJUSTMENT_TYPES,
     CATEGORIES,
     EASTERN,
-    FINAL_STATUSES,
     FORM_CONFIG,
-    START_HOURS,
     FormState,
     allowed_actions,
+    parse_clock_time,
+    parse_location_date,
+    shown_email,
+    uses_concierge_email,
 )
 
 log = logging.getLogger(__name__)
@@ -42,8 +44,6 @@ async def _ephemeral_error(interaction: discord.Interaction, message: str):
         await interaction.response.send_message(message, ephemeral=True)
 
 
-ET_NOTE = "All dates and times are New York / Eastern Time."
-ET_HEADING = "**All dates and times must be entered in New York / Eastern Time.**\n\n"
 
 
 class OwnedView(discord.ui.View):
@@ -164,10 +164,9 @@ class WhenIWorkView(OwnedView):
     async def choose(self, interaction, value):
         state = FormState(form_type="when_i_work", form_subtype=value)
         if value == "timesheet_adjustment":
-            view = AdjustmentTypeView(self.service, self.owner_id, state, back=self.again)
-        else:
-            view = DateRangeView(self.service, self.owner_id, state, "start", back=self.again)
-        await self.show(interaction, view)
+            await self.show(interaction, AdjustmentTypeView(self.service, self.owner_id, state, back=self.again))
+            return
+        await interaction.response.send_modal(MessageModal(self.service, state))
 
 
 class CategoryView(OwnedView):
@@ -200,11 +199,7 @@ class AdjustmentTypeView(OwnedView):
 
     async def choose(self, interaction, value):
         self.state.adjustment_type = value
-        today = datetime.now(EASTERN).date()
-        await self.show(interaction, DateChoiceView(
-            self.service, self.owner_id, self.state, "start",
-            today - timedelta(days=14), today, back=self.again,
-        ))
+        await interaction.response.send_modal(MessageModal(self.service, self.state))
 
 
 def _date_limits() -> tuple[date, date]:
@@ -217,117 +212,6 @@ def _date_limits() -> tuple[date, date]:
     return today - timedelta(days=past), today + timedelta(days=future)
 
 
-class DateRangeView(OwnedView):
-    def __init__(self, service, owner_id: int, state: FormState, target: str, *, back=None):
-        super().__init__(owner_id, back=back)
-        self.service = service
-        self.state = state
-        self.target = target
-        self.prompt = (
-            "**Enter the scheduled shift date and start time in New York / Eastern Time.**\n\n"
-            f"{FORM_CONFIG['prompts']['start_date_range']}"
-        )
-        self.again = lambda: DateRangeView(service, owner_id, state, target, back=back)
-        first, last = _date_limits()
-        ranges = []
-        cursor = first
-        while cursor <= last:
-            end = min(cursor + timedelta(days=13), last)
-            ranges.append((cursor, end))
-            cursor = end + timedelta(days=1)
-        if len(ranges) > 25:
-            raise ValueError("Configured form date range is too large; maximum is 350 days.")
-        self.ranges = ranges
-        self.add_item(ChoiceSelect([
-            discord.SelectOption(
-                label=f"{start:%b} {start.day}, {start.year} – {end:%b} {end.day}, {end.year}",
-                value=str(index),
-            )
-            for index, (start, end) in enumerate(ranges)
-        ], f"Select the {target} date range"))
-
-    async def choose(self, interaction, value):
-        start, end = self.ranges[int(value)]
-        await self.show(interaction, DateChoiceView(
-            self.service, self.owner_id, self.state, self.target, start, end, back=self.again,
-        ))
-
-
-class DateChoiceView(OwnedView):
-    def __init__(self, service, owner_id, state, target, first, last, *, back=None):
-        super().__init__(owner_id, back=back)
-        self.service = service
-        self.state = state
-        self.target = target
-        date_prompt = FORM_CONFIG["prompts"][target + "_date"]
-        # Timesheet adjustments reach this step straight from the adjustment type, so it leads with the ET rule.
-        self.prompt = (
-            ET_HEADING + date_prompt if state.form_subtype == "timesheet_adjustment" else f"{date_prompt} {ET_NOTE}"
-        )
-        self.again = lambda: DateChoiceView(service, owner_id, state, target, first, last, back=back)
-        options = []
-        cursor = first
-        while cursor <= last:
-            options.append(discord.SelectOption(label=_date_label(cursor), value=cursor.isoformat()))
-            cursor += timedelta(days=1)
-        self.add_item(ChoiceSelect(options, f"Select the {target} date"))
-
-    async def choose(self, interaction, value):
-        setattr(self.state, f"{self.target}_date", date.fromisoformat(value))
-        await self.show(interaction, HourView(self.service, self.owner_id, self.state, self.target, back=self.again))
-
-
-class HourView(OwnedView):
-    def __init__(self, service, owner_id, state, target, *, back=None):
-        super().__init__(owner_id, back=back)
-        self.service = service
-        self.state = state
-        self.target = target
-        if target == "end":
-            self.prompt = (
-                f"{ET_HEADING}{FORM_CONFIG['prompts']['end_hour']}\n"
-                "The end date is the same as the selected start date."
-            )
-        else:
-            self.prompt = f"{FORM_CONFIG['prompts'][target + '_hour']} {ET_NOTE}"
-        self.again = lambda: HourView(service, owner_id, state, target, back=back)
-        options = []
-        for hour in START_HOURS if target == "start" else range(24):
-            label_hour = hour % 12 or 12
-            suffix = "am" if hour < 12 else "pm"
-            label = f"{label_hour}{suffix}" if target == "start" else f"{label_hour} {suffix.upper()}"
-            options.append(discord.SelectOption(label=label, value=str(hour)))
-        self.add_item(ChoiceSelect(options, f"Select the {target} time" if target == "start" else f"Select the {target} hour"))
-
-    async def choose(self, interaction, value):
-        setattr(self.state, f"{self.target}_hour", int(value))
-        if self.target == "start":
-            self.state.start_minute = 0
-            if self.state.form_subtype == "timesheet_adjustment":
-                await self.show(interaction, HourView(self.service, self.owner_id, self.state, "end", back=self.again))
-                return
-            await interaction.response.send_modal(MessageModal(self.service, self.state))
-            return
-        await self.show(interaction, MinuteView(self.service, self.owner_id, self.state, self.target, back=self.again))
-
-
-class MinuteView(OwnedView):
-    def __init__(self, service, owner_id, state, target, *, back=None):
-        super().__init__(owner_id, back=back)
-        self.service = service
-        self.state = state
-        self.target = target
-        self.prompt = f"{FORM_CONFIG['prompts'][target + '_minute']} {ET_NOTE}"
-        self.add_item(ChoiceSelect([
-            discord.SelectOption(label=f":{minute:02d}", value=str(minute))
-            for minute in (0, 15, 30, 45)
-        ], f"Select the {target} minutes"))
-
-    async def choose(self, interaction, value):
-        setattr(self.state, f"{self.target}_minute", int(value))
-        await interaction.response.send_modal(MessageModal(self.service, self.state))
-
-
 class MessageModal(discord.ui.Modal):
     def __init__(self, service, state: FormState):
         key = state.form_subtype if state.form_type == "when_i_work" else state.form_type
@@ -336,11 +220,17 @@ class MessageModal(discord.ui.Modal):
         self.service = service
         self.state = state
         self.message_id_input = self.start_input = self.end_input = None
+        self.shift_date_input = self.start_time_input = self.end_time_input = None
         if state.form_type == "dispute":
             self.message_id_input = self._short_input("Message ID", "The ID of the message you are disputing", 100)
         if state.form_type == "working_location":
-            self.start_input = self._short_input("Start Date", "MM/DD/YYYY", 50)
-            self.end_input = self._short_input("End Date", "MM/DD/YYYY", 50)
+            self.start_input = self._short_input("Start Date (MM/DD/YYYY)", "Example: 11/10/2026", 10)
+            self.end_input = self._short_input("End Date (MM/DD/YYYY)", "Example: 11/14/2026", 10)
+        if state.form_subtype in ("timesheet_adjustment", "emergency_shift_release"):
+            self.shift_date_input = self._short_input("Shift date (MM/DD/YYYY)", "Example: 11/10/2026 (ET)", 10)
+            self.start_time_input = self._short_input("Start time (hh:mm AM/PM)", "Example: 09:00 AM (ET)", 8)
+        if state.form_subtype == "timesheet_adjustment":
+            self.end_time_input = self._short_input("End time (hh:mm AM/PM)", "Example: 05:30 PM (ET)", 8)
         self.message_input = discord.ui.TextInput(
             label=fields["question"],
             placeholder=fields["placeholder"],
@@ -358,21 +248,30 @@ class MessageModal(discord.ui.Modal):
         self.add_item(field)
         return field
 
-    async def on_submit(self, interaction: discord.Interaction):
-        # A deferred update of the step message: on success it becomes the confirmation with no
-        # controls, so the form cannot be submitted twice; on a rejected choice it keeps its Back button.
-        await interaction.response.defer()
+    def _apply_inputs(self):
         if self.message_id_input is not None:
             self.state.reference_message_id = str(self.message_id_input)
         if self.start_input is not None:
             self.state.location_start, self.state.location_end = str(self.start_input), str(self.end_input)
+        if self.shift_date_input is not None:
+            self.state.start_date = _parse_shift_date(str(self.shift_date_input), "Shift date")
+        if self.start_time_input is not None:
+            self.state.start_hour, self.state.start_minute = parse_clock_time(str(self.start_time_input), "Start time")
+        if self.end_time_input is not None:
+            self.state.end_hour, self.state.end_minute = parse_clock_time(str(self.end_time_input), "End time")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # A deferred update of the step message: on success it becomes the confirmation with no
+        # controls, so the form cannot be submitted twice; on a rejected choice it keeps its Back button.
+        await interaction.response.defer()
         try:
+            self._apply_inputs()
             row = await self.service.submit(interaction, self.state, str(self.message_input))
         except PermissionError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
         except ValueError as exc:
-            await interaction.followup.send(f"Form validation failed: {exc} Use Back to change it.", ephemeral=True)
+            await interaction.followup.send(f"Form validation failed: {exc} Open the form again to retry.", ephemeral=True)
             return
         except Exception as exc:
             log.exception("Could not persist form submission")
@@ -386,7 +285,19 @@ class MessageModal(discord.ui.Modal):
                 ephemeral=True,
             )
             return
-        await interaction.edit_original_response(content=_confirmation(row), view=None)
+        try:
+            await interaction.edit_original_response(content=_confirmation(row), view=None)
+        except discord.HTTPException:
+            # Opened from the workflows buttons there is no step message to edit.
+            await interaction.followup.send(_confirmation(row), ephemeral=True)
+
+
+def _parse_shift_date(value: str, label: str) -> date:
+    day = parse_location_date(value, label)
+    first, last = _date_limits()
+    if not first <= day <= last:
+        raise ValueError(f"{label} must be between {first:%m/%d/%Y} and {last:%m/%d/%Y}.")
+    return day
 
 
 def _confirmation(row: dict) -> str:
@@ -473,6 +384,33 @@ class SendDmModal(discord.ui.Modal, title="Send DM to submitter"):
         await self.service.alert_error("form_dm_failed", interaction_id=interaction.id, error=error)
 
 
+class TimesheetRejectModal(discord.ui.Modal, title="Reject timesheet adjustment"):
+    reason = discord.ui.TextInput(
+        label="Reason",
+        placeholder="Sent to the requester, who will need to submit a new Timesheet Adjustment",
+        style=discord.TextStyle.paragraph,
+        min_length=1,
+        max_length=1000,
+    )
+
+    def __init__(self, service, submission_id: str, review_message):
+        super().__init__(timeout=900)
+        self.service = service
+        self.submission_id = submission_id
+        self.review_message = review_message
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await self.service.reject_timesheet(
+            interaction, self.submission_id, str(self.reason).strip(), self.review_message,
+        )
+
+    async def on_error(self, interaction, error):
+        log.exception("Timesheet rejection failed", exc_info=error)
+        await _ephemeral_error(interaction, "The rejection could not be completed. Please try again.")
+        await self.service.alert_error("form_review_failed", interaction_id=interaction.id, error=error)
+
+
 class ReviewView(discord.ui.View):
     def __init__(self, service, form_type=None, form_subtype=None, disabled=False):
         super().__init__(timeout=None)
@@ -506,7 +444,12 @@ def review_embed(row: dict) -> discord.Embed:
     )
     embed.add_field(name="Submission ID", value=row["submission_id"], inline=False)
     embed.add_field(name="Agent", value=row["employee_name"], inline=True)
-    embed.add_field(name="Agent Email", value=row["employee_email"], inline=True)
+    concierge = uses_concierge_email(row["form_type"], row.get("form_subtype"))
+    embed.add_field(
+        name="Concierge Email" if concierge else "Agent Email",
+        value=shown_email(row),
+        inline=True,
+    )
     embed.add_field(name="Status", value=row["status"], inline=True)
     if row.get("adjustment_type"):
         embed.add_field(name="Adjustment Type", value=row["adjustment_type"], inline=False)

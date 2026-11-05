@@ -54,7 +54,9 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
             ow = next((ow for role, ow in guild.overwrites[key].items() if role.name == role_name), None)
             return ow and (ow.view_channel, ow.send_messages)
 
-        self.assertEqual(access("OPERATIONS/announcements", "@everyone"), (True, False))
+        # OPERATIONS is hidden from people without the Operations role, which verified members get.
+        self.assertEqual(access("OPERATIONS/announcements", "@everyone"), (False, None))
+        self.assertEqual(access("OPERATIONS/announcements", "Operations"), (True, None))
         self.assertEqual(access("OPERATIONS/announcements", "Leadership"), (True, True))
         self.assertEqual(access("OPERATIONS/announcements", "Workflows"), (True, True))
         self.assertEqual(access("WORKFLOWS/main", "Workflows"), (True, True))
@@ -65,6 +67,12 @@ class SetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(access("WORKFLOWS/qa-disputes", "Leadership"), (True, None))
         self.assertEqual(access("BOT/errors", "@everyone"), (False, None))
         self.assertIsNone(access("BOT/errors", "Moderator"))
+        # SETUP is public, but initial-setup is locked to read-only for everyone.
+        self.assertEqual(access("SETUP/initial-setup", "@everyone"), (True, False))
+        # WORKFLOWS/main is read-only for everyone, but slash commands such as /workflow still work there.
+        self.assertEqual(access("WORKFLOWS/main", "@everyone"), (True, False))
+        self.assertTrue(next(ow for role, ow in guild.overwrites["WORKFLOWS/main"].items()
+                             if role.name == "@everyone").use_application_commands)
 
 
 class ReviewerTests(unittest.TestCase):

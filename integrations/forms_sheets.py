@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import os
 import threading
+from datetime import datetime
 
 import gspread
 from gspread.utils import rowcol_to_a1
 
-from forms.domain import sheet_tab_for
+from forms.domain import shown_email, sheet_tab_for
 
 HEADERS = {
     "WIW Timesheet Adjustments": [
-        "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
-        "Agent Email", "Agent Name", "Status", "Adjustment Type", "Start Time ET",
-        "Start Time UTC", "End Time ET", "End Time UTC", "Adjustment Reason", "Reviewed By",
-        "Reviewed At ET", "Reviewed At UTC",
+        "Submission ID", "Submitted At ET", "Discord User ID", "Concierge Email", "Agent Name",
+        "Adjustment Type", "Start Time ET", "End Time ET", "Adjustment Reason",
+        "Reviewed By", "Reviewed At ET",
     ],
     "WIW Emergency Releases": [
         "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
@@ -26,9 +26,8 @@ HEADERS = {
         "Reviewed By", "Reviewed At ET", "Reviewed At UTC",
     ],
     "Disputes": [
-        "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
-        "Agent Email", "Agent Name", "Status", "Message ID", "Dispute Reasoning",
-        "Reviewed By", "Reviewed At ET", "Reviewed At UTC",
+        "Timestamp", "Submitted By", "Send ID", "Dispute Reasoning",
+        "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID", "Agent Name",
     ],
     "Working Location": [
         "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
@@ -50,14 +49,14 @@ def sheet_values(row: dict) -> list:
     tab = sheet_tab_for(row["form_type"], row.get("form_subtype"))
     common = [
         row["submission_id"], row["submitted_at_et"], row["submitted_at_utc"],
-        str(row["discord_user_id"]), row["employee_email"], row["employee_name"],
+        str(row["discord_user_id"]), shown_email(row), row["employee_name"],
     ]
     if tab == "WIW Timesheet Adjustments":
-        return common + [
-            row["status"], row.get("adjustment_type") or "", row.get("start_time_et") or "",
-            row.get("start_time_utc") or "", row.get("end_time_et") or "",
-            row.get("end_time_utc") or "", row["message"], _reviewed_by(row),
-            row.get("reviewed_at_et") or "", row.get("reviewed_at_utc") or "",
+        return [
+            row["submission_id"], row["submitted_at_et"], str(row["discord_user_id"]),
+            shown_email(row), row["employee_name"], row.get("adjustment_type") or "",
+            row.get("start_time_et") or "", row.get("end_time_et") or "", row["message"],
+            _reviewed_by(row), row.get("reviewed_at_et") or "",
         ]
     if tab == "WIW Emergency Releases":
         return common + [
@@ -67,7 +66,12 @@ def sheet_values(row: dict) -> list:
         ]
     reviewed = [_reviewed_by(row), row.get("reviewed_at_et") or "", row.get("reviewed_at_utc") or ""]
     if tab == "Disputes":
-        return common + [row["status"], row.get("reference_message_id") or "", row["message"]] + reviewed
+        submitted_epoch = int(datetime.fromisoformat(row["submitted_at_utc"]).timestamp())
+        return [
+            submitted_epoch, shown_email(row), row.get("reference_message_id") or "", row["message"],
+            row["submission_id"], row["submitted_at_et"], row["submitted_at_utc"],
+            str(row["discord_user_id"]), row["employee_name"],
+        ]
     if tab == "Working Location":
         return common + [
             row["status"], row.get("start_date") or "", row.get("end_date") or "", row["message"],
@@ -107,9 +111,10 @@ class FormsSheet:
         """Append or replace one row, using Submission ID as the idempotency key."""
         tab = sheet_tab_for(row["form_type"], row.get("form_subtype"))
         values = sheet_values(row)
+        id_column = HEADERS[tab].index("Submission ID") + 1
         with self._lock:
             worksheet = self._worksheet(tab)
-            ids = worksheet.col_values(1)
+            ids = worksheet.col_values(id_column)
             try:
                 row_number = ids.index(row["submission_id"]) + 1
             except ValueError:

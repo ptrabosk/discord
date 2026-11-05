@@ -1,6 +1,6 @@
 import asyncio
 import discord
-from database.database import get_verified_user, audit
+from database.database import get_verified_user, delete_verified_user, audit
 from bot.permissions import is_admin, sync_member_roles
 
 def register_commands(bot, sheet):
@@ -36,3 +36,22 @@ def register_commands(bot, sheet):
         added, removed = await sync_member_roles(member, record)
         audit(member.id, email, "MANUAL_SYNC", f"By={interaction.user.id}; Added={added}; Removed={removed}")
         await interaction.response.send_message(f"Added: {added or 'None'}\nRemoved: {removed or 'None'}", ephemeral=True)
+
+    @bot.tree.command(name="access_reset", description="Remove a member's managed roles and forget their verification")
+    async def access_reset(interaction: discord.Interaction, member: discord.Member):
+        if not is_admin(interaction):
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+            return
+        row = get_verified_user(member.id)
+        # Roles come off even if the member was never verified, so stale roles can be cleared.
+        email = row[1] if row else ""
+        added, removed = await sync_member_roles(member, None)
+        if row:
+            delete_verified_user(member.id)
+            await asyncio.to_thread(sheet.mark_verified_many, [email], "FALSE")
+        audit(member.id, email, "ACCESS_RESET", f"By={interaction.user.id}; Removed={removed}")
+        await interaction.response.send_message(
+            f"Removed roles: {removed or 'None'}\n"
+            f"{'Verification cleared for ' + email if row else 'Member was not verified.'}",
+            ephemeral=True
+        )

@@ -14,7 +14,9 @@
     "Leadership",
     "QA",
     "Ops Bot Admin",
-    "Moderator"
+    "Moderator",
+    "Operations",
+    "Casual"
   ],
   "categories": [
     {
@@ -22,7 +24,8 @@
       "public": true,
       "channels": [
         {
-          "name": "initial-setup"
+          "name": "initial-setup",
+          "read_only": true
         }
       ]
     },
@@ -39,7 +42,7 @@
     },
     {
       "name": "OPERATIONS",
-      "public": true,
+      "view_roles": ["Operations"],
       "channels": [
         {
           "name": "announcements"
@@ -164,7 +167,8 @@
       "channels": [
         {
           "name": "main",
-          "public": true
+          "read_only": true,
+          "allow_commands": true
         },
         {
           "name": "wiw-adjustments"
@@ -221,7 +225,7 @@
     },
     {
       "name": "CASUAL",
-      "public": true,
+      "roles": ["Casual"],
       "channels": [
         {
           "name": "chat"

@@ -80,6 +80,13 @@ async def run_setup(guild):
                     view_channel=True, send_messages=True, read_message_history=True
                 )
 
+            # Read-only channel override, e.g. SETUP/initial-setup: everyone can read but not post.
+            if ch_cfg.get("read_only"):
+                channel_overwrites[everyone] = discord.PermissionOverwrite(
+                    view_channel=True, send_messages=False, read_message_history=True,
+                    use_application_commands=True if ch_cfg.get("allow_commands") else None,
+                )
+
             # Subteam channel override: hide from parent category role and show only subteam.
             sub_role = role_map.get(ch_cfg.get("role"))
             if sub_role:

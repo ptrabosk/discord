@@ -1,10 +1,29 @@
 import asyncio
 import logging
 from discord.ext import tasks
-from database.database import list_verified_users, touch_sync, audit
+from database.database import list_verified_users, touch_sync, audit, get_verified_user, delete_verified_user
 from bot.permissions import sync_member_roles
 
 log = logging.getLogger(__name__)
+
+async def forget_removed_member(user_id, sheet):
+    """Drop a removed member's verification so their email is free for the right account.
+
+    Returns True if there was a verification to drop. Their roles are already gone with their membership.
+    """
+    row = get_verified_user(user_id)
+    if not row:
+        return False
+    email = row[1]
+    delete_verified_user(user_id)
+    audit(user_id, email, "ACCESS_RESET", "Member left or was removed from the server")
+    try:
+        await asyncio.to_thread(sheet.mark_verified_many, [email], "FALSE")
+    except Exception:
+        # The local link is already gone, which is what blocks or allows verification; the sheet cell is a convenience.
+        log.exception("Could not clear the Verified cell for a removed member")
+        audit(user_id, email, "ACCESS_RESET_SHEET_FAILED", "Verified cell not cleared")
+    return True
 
 class AccessSync:
     def __init__(self, bot, sheet, guild_id, minutes):

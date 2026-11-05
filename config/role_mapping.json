@@ -12,8 +12,11 @@
     "Concierge - Thaniel",
     "Workflows",
     "Leadership",
-    "QA"
+    "QA",
+    "Operations",
+    "Casual"
   ],
+  "verified_roles": ["Operations", "Casual"],
   "sheet_columns": {
     "Professional Services": "Professional Services",
     "White Glove": "White Glove",

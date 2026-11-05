@@ -75,6 +75,10 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
         await interaction.response.defer(ephemeral=True, thinking=True)
         email = str(self.email).strip().lower()
         if not EMAIL_RE.match(email) or not _allowed(email):
+            # Every refusal is audited and logged with its reason; the user always gets the same message.
+            reason = "Email format rejected" if not EMAIL_RE.match(email) else "Email domain not allowed"
+            audit(interaction.user.id, email, "VERIFICATION_FAILED", reason)
+            log.warning("Verification refused for user %s: %s", interaction.user.id, reason)
             await interaction.followup.send(
                 "We couldn't verify this email. Contact Operations if you believe you should have access.",
                 ephemeral=True
@@ -85,13 +89,21 @@ class EmailModal(discord.ui.Modal, title="Verify Work Email"):
         blocked = code_request_blocked(interaction.user.id, email)
         if blocked:
             audit(interaction.user.id, email, "VERIFICATION_THROTTLED", blocked)
+            log.warning("Verification throttled for user %s: %s", interaction.user.id, blocked)
             await interaction.followup.send(THROTTLED, ephemeral=True)
             return
 
         record = await asyncio.to_thread(self.sheet.get_by_email, email)
         existing = get_verified_by_email(email)
-        if not record or not truthy(record.get("Active")) or (existing and existing[0] != interaction.user.id):
-            audit(interaction.user.id, email, "VERIFICATION_FAILED", "Email not authorized or already linked")
+        if not record or not truthy(record.get("Active")):
+            reason = "Not in roster or inactive"
+        elif existing and existing[0] != interaction.user.id:
+            reason = "Linked to another Discord account"
+        else:
+            reason = None
+        if reason:
+            audit(interaction.user.id, email, "VERIFICATION_FAILED", reason)
+            log.warning("Verification refused for user %s (%s): %s", interaction.user.id, _mask(email), reason)
             await interaction.followup.send(
                 "We couldn't verify this email. Contact Operations if you believe you should have access.",
                 ephemeral=True
@@ -136,21 +148,28 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
         row = get_code(interaction.user.id)
         max_attempts = int(os.getenv("VERIFICATION_MAX_ATTEMPTS","5"))
         if not row:
+            audit(interaction.user.id, None, "VERIFICATION_FAILED", "No active request")
+            log.warning("Verification code entered with no open request, user %s", interaction.user.id)
             await interaction.followup.send("No active verification request. Start again.", ephemeral=True)
             return
         email, code_hash, expires_at, attempts, _ = row
         if guesses_exhausted(interaction.user.id, email):
             delete_code(interaction.user.id)
             audit(interaction.user.id, email, "VERIFICATION_THROTTLED", "daily_guess_limit")
+            log.warning("Verification throttled for user %s: daily_guess_limit", interaction.user.id)
             await interaction.followup.send(THROTTLED, ephemeral=True)
             return
         if attempts >= max_attempts or datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
             delete_code(interaction.user.id)
+            reason = "Too many attempts" if attempts >= max_attempts else "Code expired"
+            audit(interaction.user.id, email, "VERIFICATION_EXPIRED", reason)
+            log.warning("Verification ended for user %s: %s", interaction.user.id, reason)
             await interaction.followup.send("Verification expired. Start again.", ephemeral=True)
             return
         if not hmac.compare_digest(_hash(str(self.code).strip()), code_hash):
             increment_attempts(interaction.user.id)
             audit(interaction.user.id, email, "VERIFICATION_FAILED", "Incorrect code")
+            log.info("Incorrect verification code for user %s (attempt %s)", interaction.user.id, attempts + 1)
             await interaction.followup.send("Incorrect verification code.", ephemeral=True)
             return
 
@@ -158,6 +177,8 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
         record = await asyncio.to_thread(self.sheet.get_by_email, email)
         if not record or not truthy(record.get("Active")):
             delete_code(interaction.user.id)
+            audit(interaction.user.id, email, "VERIFICATION_FAILED", "Not in roster or inactive")
+            log.warning("Verification refused for user %s at code step: not in roster or inactive", interaction.user.id)
             await interaction.followup.send(
                 "We couldn't verify this email. Contact Operations if you believe you should have access.",
                 ephemeral=True
@@ -166,6 +187,12 @@ class CodeModal(discord.ui.Modal, title="Enter Verification Code"):
 
         save_verified_user(interaction.user.id, email)
         delete_code(interaction.user.id)
+        try:
+            if not await asyncio.to_thread(self.sheet.mark_verified, email):
+                log.warning("No Access row matched %s when setting Verified", _mask(email))
+        except Exception:
+            # The local verified-user record is the source of truth; the sheet cell is a convenience.
+            log.exception("Could not set the Verified column on the Discord Access sheet")
         try:
             added, removed = await sync_member_roles(interaction.user, record)
         except Exception as exc:

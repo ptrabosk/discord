@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 from pathlib import Path
@@ -86,13 +87,8 @@ ACTION_STATUSES = {
     ("when_i_work", "timesheet_adjustment"): {
         "approve": "Approved",
         "reject": "Rejected",
-        "need_info": "Needs Information",
     },
-    ("when_i_work", "emergency_shift_release"): {
-        "approve": "Approved",
-        "reject": "Rejected",
-        "need_info": "Needs Information",
-    },
+    ("when_i_work", "emergency_shift_release"): {},
     ("question", None): {
         "answered": "Answered",
         "need_info": "Needs Information",
@@ -154,6 +150,17 @@ def sheet_tab_for(form_type: str, form_subtype: str | None = None) -> str:
         raise ValueError("Unknown form type.") from exc
 
 
+def uses_concierge_email(form_type: str, form_subtype: str | None = None) -> bool:
+    return (form_type, form_subtype) in {("dispute", None), ("when_i_work", "timesheet_adjustment")}
+
+
+def shown_email(row: dict) -> str:
+    """The Concierge Email for disputes and timesheet adjustments; the work email otherwise or when none is set."""
+    if uses_concierge_email(row["form_type"], row.get("form_subtype")):
+        return row.get("concierge_email") or row["employee_email"]
+    return row["employee_email"]
+
+
 def status_for_action(form_type: str, form_subtype: str | None, action: str) -> str:
     try:
         return ACTION_STATUSES[(form_type, form_subtype)][action]
@@ -196,11 +203,34 @@ def form_datetimes(state: FormState) -> tuple[datetime, datetime, datetime | Non
     return start_et, start_utc, None, None
 
 
+def parse_location_date(value: str, label: str) -> date:
+    text = value.strip()
+    if not re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", text):
+        raise ValueError(f"{label} must be in MM/DD/YYYY format, for example 11/10/2026 or 1/5/2026.")
+    try:
+        return datetime.strptime(text, "%m/%d/%Y").date()
+    except ValueError as exc:
+        raise ValueError(f"{label} is not a real date.") from exc
+
+
+def parse_clock_time(value: str, label: str) -> tuple[int, int]:
+    """A 12-hour clock time such as 09:00 AM, returned as (24-hour hour, minute)."""
+    match = re.fullmatch(r"(1[0-2]|0?[1-9]):([0-5]\d) ?(AM|PM)", value.strip(), re.IGNORECASE)
+    if not match:
+        raise ValueError(f"{label} must be in h:mm AM/PM format, for example 9:00 AM or 09:00 AM.")
+    hour = int(match.group(1)) % 12 + (12 if match.group(3).upper() == "PM" else 0)
+    return hour, int(match.group(2))
+
+
 def working_location_dates(state: FormState) -> tuple[str, str]:
     start, end = (state.location_start or "").strip(), (state.location_end or "").strip()
     if not start or not end:
         raise ValueError("A start date and an end date are required.")
-    return start, end
+    start_day = parse_location_date(start, "Start date")
+    end_day = parse_location_date(end, "End date")
+    if end_day < start_day:
+        raise ValueError("The end date cannot be before the start date.")
+    return f"{start_day:%m/%d/%Y}", f"{end_day:%m/%d/%Y}"
 
 
 def submission_prefix(form_type: str, form_subtype: str | None) -> str:

@@ -28,7 +28,7 @@ def desired_roles(record):
     if not record or not truthy(record.get("Active")):
         return set()
 
-    desired = {"Verified"}
+    desired = {"Verified", *ROLE_CONFIG.get("verified_roles", [])}
 
     for column, role in ROLE_CONFIG["sheet_columns"].items():
         if truthy(record.get(column)):

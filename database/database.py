@@ -93,6 +93,11 @@ def list_verified_users():
     with connect() as con:
         return con.execute("SELECT discord_user_id,email FROM verified_users").fetchall()
 
+def delete_verified_user(user_id):
+    with connect() as con:
+        con.execute("DELETE FROM verified_users WHERE discord_user_id=?", (user_id,))
+        con.execute("DELETE FROM verification_codes WHERE discord_user_id=?", (user_id,))
+
 def touch_sync(user_id):
     with connect() as con:
         con.execute("UPDATE verified_users SET last_sync_at=? WHERE discord_user_id=?", (now(), user_id))

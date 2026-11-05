@@ -64,13 +64,15 @@ Creates and manages the Discord operations server structure, controlled agent on
 `config/server_structure.json` options: `public`, `role` (full access), `also_roles` (full access to
 the whole category, team channels included), `roles` / `view_roles` (extra full or view-only access),
 `post_roles` (on a public category: only these roles post), and `private` (a channel that ignores
-its category's permissions).
+its category's permissions), and `read_only` (a channel in a public category that everyone can read but not post in).
 
 ## Google Sheet
 
 Create a worksheet named `Discord Access` with these headers:
 
-Email | First Name | Last Name | Active | Professional Services | White Glove | Growth Strategy | Order Operations | Fashion Nova | Concierge | Team Lead Email | Workflows | Leadership | QA
+Email | Attentive Email | Concierge Email | First Name | Team Lead Email | Last Name | Active | Professional Services | White Glove | Growth Strategy | Order Operations | Fashion Nova | Concierge | Workflows | Leadership | QA | Verified
+
+The bot finds columns by header name, so column letters can change. `Attentive Email` and `Concierge Email` are optional; disputes and timesheet adjustments use `Concierge Email` and fall back to the work email when it is blank. The bot sets `Verified` to TRUE when a person completes Verify Work Email. Verify Work Email matches only the `Email` column, and access sync does the same. If an agent's `Email` changes, the next access sync removes their managed roles until they verify again with the new address. An address that is not on an active row, or that is already linked to another Discord account, is refused; each refusal is logged and written to `audit_log` with its reason.
 
 Boolean access fields accept TRUE/YES/1/X.
 
@@ -121,17 +123,18 @@ sharing still allows the access-roster Sheet to remain Viewer-only.
 
 The bot creates missing forms tabs when permitted. Existing tabs must have these exact headers:
 
-- `WIW Timesheet Adjustments`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
-  Agent Email, Agent Name, Status, Adjustment Type, Start Time ET, Start Time UTC, End Time ET,
-  End Time UTC, Adjustment Reason, Reviewed By, Reviewed At ET, Reviewed At UTC
+- `WIW Timesheet Adjustments`: Submission ID, Submitted At ET, Discord User ID, Concierge Email (falls back
+  to the work email), Agent Name, Adjustment Type, Start Time ET, End Time ET, Adjustment Reason, Reviewed By,
+  Reviewed At ET
 - `WIW Emergency Releases`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
   Agent Email, Agent Name, Status, Shift Start ET, Shift Start UTC, Release Reason, Reviewed By,
   Reviewed At ET, Reviewed At UTC
 - `Questions Concerns Feedback`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
   Agent Email, Agent Name, Type, Category, Message, Status, Reviewed By, Reviewed At ET,
   Reviewed At UTC
-- `Disputes`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID, Agent Email,
-  Agent Name, Status, Message ID, Dispute Reasoning, Reviewed By, Reviewed At ET, Reviewed At UTC
+- `Disputes`: Timestamp (Unix epoch seconds of Submitted At UTC), Submitted By (Concierge Email, falling back to the work email), Send ID
+  (the Message ID), Dispute Reasoning, Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
+  Agent Name
 - `Working Location`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
   Agent Email, Agent Name, Status, Start Date, End Date, New Location, Reviewed By,
   Reviewed At ET, Reviewed At UTC
@@ -150,17 +153,11 @@ type and reference, not agent messages or credentials. An agent is told about de
 only if both the review-channel post and Sheets write fail. Existing launcher buttons and reviewer
 buttons survive bot restarts.
 
-Timesheet Adjustments show one date menu containing today and the previous 14 days in New York.
-The end date is automatically the same as the selected start date; agents choose only the end
-time. Emergency Shift Releases keep the range-then-date picker, configurable with
-`FORM_DATE_PAST_DAYS` and `FORM_DATE_FUTURE_DAYS` (maximum 350 selectable dates). Start times are
-selected from `start_hours` in `config/forms.json`, with minutes fixed at `:00`; end times are
-selected by hour and then `00`, `15`, `30`, or `45`. Local datetimes use `America/New_York` and are
-stored in both ET and UTC.
+Timesheet Adjustments and Emergency Shift Releases open one modal with typed fields in New York time: the shift date as `MM/DD/YYYY` (within `FORM_DATE_PAST_DAYS` and `FORM_DATE_FUTURE_DAYS`, default 30 each way), the start time as `hh:mm AM/PM`, and for timesheets the end time as `hh:mm AM/PM` on the same date. Start times must be one of `start_hours` in `config/forms.json` on the hour; end times must fall on a `00`, `15`, `30`, or `45` minute. Local datetimes use `America/New_York` and are stored in both ET and UTC.
 
 Disputes open one modal with a required Message ID and Dispute Reasoning. Working Location opens
-one modal with required Start Date, End Date, and New Location. Discord modals have no date input,
-so both dates are free text (the placeholder suggests `MM/DD/YYYY`) and are stored as typed.
+one modal with required Start Date, End Date, and New Location. Both dates must be `MM/DD/YYYY`, real
+dates, with the end date on or after the start date; they are stored in that format.
 
 SQLite is the durable source of truth. A submission succeeds once it is stored locally. Sheets
 sync retries every `FORM_SHEETS_RETRY_MINUTES` and searches column A for the Submission ID before

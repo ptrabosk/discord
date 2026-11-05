@@ -26,8 +26,8 @@ from forms.domain import (
 )
 from integrations.forms_sheets import HEADERS, sheet_values
 from forms.views import (
-    AdjustmentTypeView, CategoryView, DateChoiceView, DateRangeView, HourView, MessageModal, MinuteView,
-    TopLevelView, WhenIWorkView, _confirmation, register_forms,
+    AdjustmentTypeView, CategoryView, MessageModal, TopLevelView, WhenIWorkView, _confirmation, _parse_shift_date,
+    register_forms,
 )
 from forms.service import DEFAULT_FORM_ERROR_CHANNEL_ID, FormsService
 
@@ -273,51 +273,60 @@ class ErrorRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("sensitive details", channel.sent)
 
 
-class FormDateSelectionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_timesheet_shows_today_and_previous_fourteen_dates(self):
-        class Response:
-            async def edit_message(self, **kwargs):
-                self.view = kwargs["view"]
+class Text:
+    """Stands in for a filled modal input; the modal reads inputs with str()."""
 
-        response = Response()
-        interaction = SimpleNamespace(response=response)
-        view = AdjustmentTypeView(None, 123, FormState("when_i_work", "timesheet_adjustment"))
-        await view.choose(interaction, FORM_CONFIG["adjustment_types"][0])
-        options = select_of(response.view).options
-        today = datetime.now(EASTERN).date()
-        self.assertEqual(len(options), 15)
-        self.assertEqual(options[0].value, (today - timedelta(days=14)).isoformat())
-        self.assertEqual(options[-1].value, today.isoformat())
+    def __init__(self, value):
+        self.value = value
 
-    async def test_start_time_choices_skip_minutes_for_both_wiw_forms(self):
-        class Response:
-            async def edit_message(self, **kwargs):
-                self.view = kwargs["view"]
+    def __str__(self):
+        return self.value
 
-            async def send_modal(self, modal):
-                self.modal = modal
 
-        expected = ["8am", "10am", "12pm", "2pm", "4pm", "6pm", "8pm", "10pm"]
-        self.assertEqual(tuple(range(8, 24, 2)), START_HOURS)
-        for subtype in ("timesheet_adjustment", "emergency_shift_release"):
-            with self.subTest(subtype=subtype):
-                state = FormState("when_i_work", subtype, start_date=date(2026, 9, 19))
-                view = HourView(None, 123, state, "start")
-                options = select_of(view).options
-                self.assertEqual([option.label for option in options], expected)
-                self.assertEqual([option.value for option in options], [str(hour) for hour in START_HOURS])
-                response = Response()
-                await view.choose(SimpleNamespace(response=response), "14")
-                self.assertEqual((state.start_hour, state.start_minute), (14, 0))
-                if subtype == "timesheet_adjustment":
-                    self.assertIsInstance(response.view, HourView)
-                    self.assertEqual(response.view.target, "end")
-                    self.assertEqual(len(select_of(response.view).options), 24)
-                    await response.view.choose(SimpleNamespace(response=response), "16")
-                    self.assertIsInstance(response.view, MinuteView)
-                else:
-                    self.assertIsInstance(response.modal, MessageModal)
+class ShiftInputTests(unittest.IsolatedAsyncioTestCase):
+    class Response:
+        async def send_modal(self, modal):
+            self.modal = modal
 
+    async def test_timesheet_asks_for_adjustment_type_then_opens_the_typed_modal(self):
+        response = self.Response()
+        await AdjustmentTypeView(None, 123, FormState("when_i_work", "timesheet_adjustment")).choose(
+            SimpleNamespace(response=response), FORM_CONFIG["adjustment_types"][0])
+        labels = [item.label for item in response.modal.children]
+        self.assertEqual(labels[:3], ["Shift date (MM/DD/YYYY)", "Start time (hh:mm AM/PM)", "End time (hh:mm AM/PM)"])
+
+    async def test_emergency_release_opens_the_modal_with_date_and_start_time_only(self):
+        response = self.Response()
+        await WhenIWorkView(None, 123).choose(SimpleNamespace(response=response), "emergency_shift_release")
+        labels = [item.label for item in response.modal.children]
+        self.assertEqual(labels, ["Shift date (MM/DD/YYYY)", "Start time (hh:mm AM/PM)", "Release Reason"])
+
+    def test_typed_shift_times_become_the_stored_times(self):
+        day = datetime.now(EASTERN).date() + timedelta(days=1)
+        state = FormState("when_i_work", "timesheet_adjustment", adjustment_type=FORM_CONFIG["adjustment_types"][0])
+        modal = MessageModal(None, state)
+        modal.shift_date_input, modal.start_time_input = Text(f"{day:%m/%d/%Y}"), Text("08:00 am")
+        modal.end_time_input = Text("10:30 AM")
+        modal._apply_inputs()
+        start_et, _, end_et, _ = form_datetimes(state)
+        self.assertEqual((start_et.date(), start_et.hour, start_et.minute), (day, 8, 0))
+        self.assertEqual((end_et.hour, end_et.minute), (10, 30))
+
+    def test_clock_times_must_be_h_mm_with_am_or_pm(self):
+        from forms.domain import parse_clock_time
+        self.assertEqual(parse_clock_time("12:15 PM", "Start time"), (12, 15))
+        self.assertEqual(parse_clock_time("12:00am", "Start time"), (0, 0))
+        self.assertEqual(parse_clock_time("9:00 AM", "Start time"), (9, 0))
+        self.assertEqual(parse_clock_time("09:30 pm", "Start time"), (21, 30))
+        for bad in ["09:00", "13:00 PM", "0:30 PM", "09:60 AM", "09:00 noon"]:
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "h:mm AM/PM"):
+                parse_clock_time(bad, "Start time")
+
+    def test_shift_dates_must_be_real_and_inside_the_form_window(self):
+        with self.assertRaisesRegex(ValueError, "MM/DD/YYYY"):
+            _parse_shift_date("2026-11-10", "Shift date")
+        with self.assertRaisesRegex(ValueError, "between"):
+            _parse_shift_date("01/01/2000", "Shift date")
 
 
 class SubmitTests(unittest.IsolatedAsyncioTestCase):
@@ -328,7 +337,9 @@ class SubmitTests(unittest.IsolatedAsyncioTestCase):
         self.service = FormsService(SimpleNamespace(guild_id=1), SimpleNamespace(client=object()))
         self.service.repository = FormsRepository(Path(self.directory.name) / "forms.db")
         self.service.repository.init()
-        self.service.employee_identity = AsyncMock(return_value=("employee@example.com", "Employee Name"))
+        self.service.employee_identity = AsyncMock(
+            return_value=("employee@example.com", "Employee Name", "concierge@example.com"),
+        )
         self.service.sync_one = AsyncMock(return_value=True)
         self.service.post_review = AsyncMock(return_value=True)
         self.service.alert_error = AsyncMock()
@@ -395,25 +406,31 @@ class SubmitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row["reference_message_id"], row["message"], row["employee_email"]), ("42", "Not mine", "employee@example.com"))
         values = sheet_values(row)
         self.assertEqual(len(values), len(HEADERS["Disputes"]))
-        self.assertEqual(values[HEADERS["Disputes"].index("Message ID")], "42")
-        self.assertEqual(values[HEADERS["Disputes"].index("Agent Email")], "employee@example.com")
+        self.assertEqual(HEADERS["Disputes"][:4], ["Timestamp", "Submitted By", "Send ID", "Dispute Reasoning"])
+        self.assertEqual(values[HEADERS["Disputes"].index("Send ID")], "42")
+        self.assertEqual(values[HEADERS["Disputes"].index("Submitted By")], "concierge@example.com")
+        self.assertEqual(values[HEADERS["Disputes"].index("Dispute Reasoning")], "Not mine")
+        self.assertEqual(values[0], int(datetime.fromisoformat(row["submitted_at_utc"]).timestamp()))
 
     async def test_working_location_requires_both_dates_and_records_them_as_typed(self):
         state = FormState("working_location", location_start="11/10/2026", location_end="  ")
         with self.assertRaisesRegex(ValueError, "end date are required"):
             await self.service.submit(self.interaction(), state, "Denver")
-        state.location_end = " Nov 14 "
+        state.location_end = "Nov 14"
+        with self.assertRaisesRegex(ValueError, "End date must be in MM/DD/YYYY"):
+            await self.service.submit(self.interaction(), state, "Denver")
+        state.location_end = " 11/14/2026 "
         with self.assertRaisesRegex(ValueError, "message or reason is required"):
             await self.service.submit(self.interaction(), state, "  ")
         row = await self.service.submit(self.interaction(), state, "Denver, CO")
         self.assertTrue(row["submission_id"].startswith("WL-"))
-        self.assertEqual((row["start_date"], row["end_date"], row["message"]), ("11/10/2026", "Nov 14", "Denver, CO"))
+        self.assertEqual((row["start_date"], row["end_date"], row["message"]), ("11/10/2026", "11/14/2026", "Denver, CO"))
         values = sheet_values(row)
         headers = HEADERS["Working Location"]
         self.assertEqual(len(values), len(headers))
         self.assertEqual(
             [values[headers.index(h)] for h in ("Agent Email", "Start Date", "End Date", "New Location")],
-            ["employee@example.com", "11/10/2026", "Nov 14", "Denver, CO"],
+            ["employee@example.com", "11/10/2026", "11/14/2026", "Denver, CO"],
         )
 
     async def test_delivery_failures_are_alerted_and_reported_on_the_row(self):
@@ -517,6 +534,48 @@ class SheetHeaderTests(unittest.TestCase):
             sheet._worksheet("Questions Concerns Feedback")
         self.assertEqual(worksheet.updates, [])
 
+    def test_disputes_and_timesheets_show_the_concierge_email_with_work_email_fallback(self):
+        base = {
+            "submission_id": "X-1", "submitted_at_utc": "2026-11-02T12:00:00+00:00",
+            "submitted_at_et": "2026-11-02T08:00:00-04:00", "discord_user_id": 7,
+            "employee_email": "work@example.com", "employee_name": "A B", "message": "m", "status": "Pending",
+        }
+        dispute = dict(base, form_type="dispute", form_subtype=None, reference_message_id="42",
+                       concierge_email="concierge@example.com")
+        self.assertIn("concierge@example.com", sheet_values(dispute))
+        self.assertNotIn("work@example.com", sheet_values(dispute))
+        timesheet = dict(base, form_type="when_i_work", form_subtype="timesheet_adjustment", concierge_email=None)
+        self.assertEqual(sheet_values(timesheet)[HEADERS["WIW Timesheet Adjustments"].index("Concierge Email")], "work@example.com")
+        question = dict(base, form_type="question", form_subtype=None, category="Pay",
+                        concierge_email="concierge@example.com")
+        self.assertEqual(sheet_values(question)[4], "work@example.com")
+
+    def test_disputes_resync_finds_the_existing_row_by_submission_id_column(self):
+        from integrations.forms_sheets import FormsSheet
+        tab = "Disputes"
+        id_column = HEADERS[tab].index("Submission ID")
+        ids = [""] * 3
+        ids[2] = "D-EXISTING"
+        worksheet = SimpleNamespace(
+            row_values=lambda row: list(HEADERS[tab]),
+            col_values=lambda column: ids if column == id_column + 1 else [],
+            updates=[], appends=[],
+        )
+        worksheet.update = lambda range_name, values, value_input_option: worksheet.updates.append((range_name, values))
+        worksheet.append_row = lambda values, value_input_option: worksheet.appends.append(values)
+        sheet = FormsSheet(None)
+        sheet._worksheet = lambda tab_name: worksheet
+        row = {
+            "submission_id": "D-EXISTING", "form_type": "dispute", "form_subtype": None,
+            "submitted_at_utc": "2026-11-02T12:00:00+00:00", "submitted_at_et": "2026-11-02T08:00:00-04:00",
+            "discord_user_id": 7, "employee_email": "a@example.com", "employee_name": "A B",
+            "reference_message_id": "42", "message": "Wrong", "status": "Pending",
+        }
+        sheet.sync_submission(row)
+        self.assertEqual(worksheet.appends, [])
+        self.assertEqual(worksheet.updates[0][0], "A3:I3")
+        self.assertEqual(worksheet.updates[0][1][0][4], "D-EXISTING")
+
 
 class RosterNameTests(unittest.TestCase):
     def test_full_name_uses_first_and_last_name_columns(self):
@@ -599,25 +658,11 @@ class BackButtonTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(screen.content, previous_prompt)
         self.assertIsInstance(screen.view, TopLevelView)
 
-    async def test_back_retraces_every_timesheet_adjustment_step(self):
-        today = datetime.now(EASTERN).date().isoformat()
-        await self.assert_back_retraces(
-            ["when_i_work", "timesheet_adjustment", FORM_CONFIG["adjustment_types"][0], today, "14", "16"],
-            [TopLevelView, WhenIWorkView, AdjustmentTypeView, DateChoiceView, HourView, HourView, MinuteView],
-        )
-
-    async def test_back_retraces_every_emergency_release_step(self):
-        today = datetime.now(EASTERN).date().isoformat()
-        await self.assert_back_retraces(
-            ["when_i_work", "emergency_shift_release", "0", today],
-            [TopLevelView, WhenIWorkView, DateRangeView, DateChoiceView, HourView],
-        )
-
     async def test_working_location_opens_a_modal_with_three_required_fields(self):
         screen, _ = await self.walk(["working_location"])
         self.assertIsInstance(screen.modal, MessageModal)
         self.assertEqual([(item.label, item.required) for item in screen.modal.children],
-                         [("Start Date", True), ("End Date", True), ("New Location", True)])
+                         [("Start Date (MM/DD/YYYY)", True), ("End Date (MM/DD/YYYY)", True), ("New Location", True)])
 
     async def test_dispute_opens_a_modal_with_both_required_fields(self):
         screen, _ = await self.walk(["dispute"])
@@ -679,15 +724,54 @@ class ModalSubmitTests(unittest.IsolatedAsyncioTestCase):
         state, message = service.submit.await_args.args[1:]
         self.assertEqual((state.location_start, state.location_end, message), ("11/10/2026", "11/14/2026", "Denver, CO"))
 
-    async def test_a_rejected_choice_keeps_the_step_and_its_back_button(self):
+    async def test_a_rejected_choice_asks_the_requester_to_open_the_form_again(self):
         service = SimpleNamespace(submit=AsyncMock(side_effect=ValueError("End time must be after start time.")))
         modal = MessageModal(service, FormState("when_i_work", "timesheet_adjustment"))
+        tomorrow = datetime.now(EASTERN).date() + timedelta(days=1)
+        modal.shift_date_input, modal.start_time_input, modal.end_time_input = (
+            Text(f"{tomorrow:%m/%d/%Y}"), Text("09:00 AM"), Text("08:00 AM"),
+        )
         interaction = self.interaction()
         await modal.on_submit(interaction)
         interaction.edit_original_response.assert_not_awaited()
         message = interaction.followup.send.await_args.args[0]
         self.assertIn("End time must be after start time.", message)
-        self.assertIn("Back", message)
+        self.assertIn("Open the form again", message)
+
+
+class WorkingLocationDateTests(unittest.TestCase):
+    def dates(self, start, end):
+        from forms.domain import working_location_dates
+        return working_location_dates(FormState("working_location", location_start=start, location_end=end))
+
+    def test_accepts_mm_dd_yyyy_and_normalizes_it(self):
+        self.assertEqual(self.dates(" 11/10/2026 ", "11/14/2026"), ("11/10/2026", "11/14/2026"))
+        self.assertEqual(self.dates("11/14/2026", "11/14/2026"), ("11/14/2026", "11/14/2026"))
+
+    def test_accepts_single_digit_month_and_day(self):
+        self.assertEqual(self.dates("1/5/2026", "1/9/2026"), ("01/05/2026", "01/09/2026"))
+
+    def test_rejects_other_formats_and_impossible_dates(self):
+        for bad in ["2026-11-10", "11/10/26", "Nov 10", "13/01/2026", "02/30/2026"]:
+            with self.assertRaisesRegex(ValueError, "Start date"):
+                self.dates(bad, "11/14/2026")
+
+    def test_end_date_cannot_be_before_start_date(self):
+        with self.assertRaisesRegex(ValueError, "cannot be before"):
+            self.dates("11/14/2026", "11/10/2026")
+
+
+class TimesheetActionTests(unittest.TestCase):
+    def test_timesheets_have_only_approve_and_reject(self):
+        from forms.domain import allowed_actions, status_for_action
+        self.assertEqual(allowed_actions("when_i_work", "timesheet_adjustment"), ("approve", "reject"))
+        self.assertEqual(status_for_action("when_i_work", "timesheet_adjustment", "reject"), "Rejected")
+        with self.assertRaisesRegex(ValueError, "not valid"):
+            status_for_action("when_i_work", "timesheet_adjustment", "need_info")
+
+    def test_emergency_shift_releases_have_no_review_actions(self):
+        from forms.domain import allowed_actions
+        self.assertEqual(allowed_actions("when_i_work", "emergency_shift_release"), ())
 
 
 if __name__ == "__main__":
