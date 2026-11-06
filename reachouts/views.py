@@ -563,6 +563,15 @@ def register_reachouts(bot, service):
             return
         await interaction.followup.send(f"Poll complete: {stats}", ephemeral=True)
 
+    @bot.tree.command(name="reachout_sync", description="Refresh the Reachout Sheets tabs from the database. Sends nothing.")
+    async def reachout_sync(interaction: discord.Interaction):
+        if not is_admin(interaction):
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        stats = await service.sync_sheets()
+        await interaction.followup.send(f"Sync complete: {stats}", ephemeral=True)
+
     @bot.tree.command(name="reachout_retry_failed", description="Retry reachout deliveries that failed permanently")
     async def reachout_retry_failed(interaction: discord.Interaction):
         if not is_admin(interaction):

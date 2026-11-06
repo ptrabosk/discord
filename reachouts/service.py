@@ -255,6 +255,17 @@ class ReachoutService:
 
     # --- polling -----------------------------------------------------------------------
 
+    async def sync_sheets(self) -> dict:
+        """What /reachout_sync runs: rewrite Sheets from SQLite. It never releases a ticked row and never runs a job."""
+        now = utcnow()
+        try:
+            return await self.poll_once(full=True, send=False)
+        except Exception as exc:
+            log.exception("Reachout Sheets sync failed")
+            self.repo.kv_set("last_poll_error", f"{iso(now)} {type(exc).__name__}: {exc}"[:1000])
+            await self.alert("sheets_poll_failed", type(exc).__name__, exc)
+            return {"poll_error": f"{type(exc).__name__}: {exc}"[:300]}
+
     async def tick(self, full: bool = True, *, send: bool = True) -> dict:
         """What /reachout_poll runs: the only Sheets read and write, then nudges and jobs.
 

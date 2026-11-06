@@ -1205,6 +1205,24 @@ class FakeTemplateSpreadsheet:
         self.requests.extend(body["requests"])
 
 
+class SyncSheetsTests(WorkflowBase):
+    """/reachout_sync refreshes Sheets from SQLite and must never release a ticked row or run a job."""
+
+    async def test_sync_restores_history_and_sends_nothing(self):
+        number, rid = await self.deliver(title="Already sent")
+        await self.poll(send=False)  # History is written on the poll after delivery
+        del self.sheet.records[HISTORY_TAB][rid]  # simulate History lost from Sheets
+        ticked = self.sheet.add(QUEUE_TAB, queue_row(title="Ticked, not released"))
+        sent_before = len(self.bot.channels[CHANNEL_ID].sent)
+        with patch.object(self.service, "run_job", AsyncMock(side_effect=AssertionError("a job ran"))) as run_job:
+            stats = await self.service.sync_sheets()
+        run_job.assert_not_awaited()
+        self.assertIn(rid, self.sheet.records[HISTORY_TAB])
+        self.assertEqual(self.sheet.row(QUEUE_TAB, ticked)["reachout_id"], "")
+        self.assertEqual(len(self.bot.channels[CHANNEL_ID].sent), sent_before)
+        self.assertNotIn("poll_error", stats)
+
+
 class TemplateSetupTests(unittest.TestCase):
     def test_setup_moves_the_old_queue_aside_and_carries_only_unsent_rows(self):
         from reachouts.sheets import ReachoutSheet
