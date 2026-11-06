@@ -72,7 +72,7 @@ Create a worksheet named `Discord Access` with these headers:
 
 Email | Attentive Email | Concierge Email | First Name | Team Lead Email | Last Name | Active | Professional Services | White Glove | Growth Strategy | Order Operations | Fashion Nova | Concierge | Workflows | Leadership | QA | Verified
 
-The bot finds columns by header name, so column letters can change. `Attentive Email` and `Concierge Email` are optional; disputes and timesheet adjustments use `Concierge Email` and fall back to the work email when it is blank. The bot sets `Verified` to TRUE when a person completes Verify Work Email. Verify Work Email matches only the `Email` column, and access sync does the same. If an agent's `Email` changes, the next access sync removes their managed roles until they verify again with the new address. An address that is not on an active row, or that is already linked to another Discord account, is refused; each refusal is logged and written to `audit_log` with its reason.
+The bot finds columns by header name, so column letters can change. `Attentive Email` and `Concierge Email` are optional; disputes and timesheet adjustments use `Concierge Email` and fall back to the personal email when it is blank. The bot sets `Verified` to TRUE when a person completes Verify Personal Email. Verify Personal Email matches only the `Email` column, and access sync does the same. If an agent's `Email` changes, the next access sync removes their managed roles until they verify again with the new address. An address that is not on an active row, or that is already linked to another Discord account, is refused; each refusal is logged and written to `audit_log` with its reason.
 
 Boolean access fields accept TRUE/YES/1/X.
 
@@ -124,7 +124,7 @@ sharing still allows the access-roster Sheet to remain Viewer-only.
 The bot creates missing forms tabs when permitted. Existing tabs must have these exact headers:
 
 - `WIW Timesheet Adjustments`: Submission ID, Submitted At ET, Discord User ID, Concierge Email (falls back
-  to the work email), Agent Name, Adjustment Type, Start Time ET, End Time ET, Adjustment Reason, Reviewed By,
+  to the personal email), Agent Name, Adjustment Type, Start Time ET, End Time ET, Adjustment Reason, Reviewed By,
   Reviewed At ET
 - `WIW Emergency Releases`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
   Agent Email, Agent Name, Status, Shift Start ET, Shift Start UTC, Release Reason, Reviewed By,
@@ -132,7 +132,7 @@ The bot creates missing forms tabs when permitted. Existing tabs must have these
 - `Questions Concerns Feedback`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
   Agent Email, Agent Name, Type, Category, Message, Status, Reviewed By, Reviewed At ET,
   Reviewed At UTC
-- `Disputes`: Timestamp (Unix epoch seconds of Submitted At UTC), Submitted By (Concierge Email, falling back to the work email), Send ID
+- `Disputes`: Timestamp (Unix epoch seconds of Submitted At UTC), Submitted By (Concierge Email, falling back to the personal email), Send ID
   (the Message ID), Dispute Reasoning, Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
   Agent Name
 - `Working Location`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
@@ -241,9 +241,9 @@ python main.py
 
 Google Sheets is the authorization source of truth.
 
-1. Agent clicks **Verify Work Email**.
+1. Agent clicks **Verify Personal Email**.
 2. Bot checks domain, roster presence, and Active status.
-3. Bot sends a six-digit code to the work email.
+3. Bot sends a six-digit code to the personal email.
 4. Agent enters the code.
 5. Bot re-reads the Sheet.
 6. Bot calculates desired managed roles.
@@ -268,8 +268,8 @@ Members with `Ops Bot Admin` or Discord Administrator can use:
 
 - `/access_status @member`
 - `/access_sync @member`
-- `/reachout_status reachout_id`, `/reachout_poll`, `/reachout_retry_failed` (when reachouts are enabled).
-  `/reachout_poll` is the only thing that reads or writes the reachout Sheet; the bot never polls it on its own.
+- `/reachout_status reachout_id`, `/reachout_poll`, `/reachout_sync`, `/reachout_retry_failed` (when reachouts are enabled).
+  `/reachout_poll` is the only command that releases ticked rows and sends. `/reachout_sync` rewrites the Sheets tabs from the database and sends nothing. The bot never polls Sheets on its own.
 
 Any verified agent can run `/workflow` privately.
 

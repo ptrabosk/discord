@@ -573,7 +573,7 @@ class DispatchTests(WorkflowBase):
         self.assertEqual(self.sheet.row(QUEUE_TAB, number)["processing_status"], "ERROR")
         self.assertIn("Test mode", self.sheet.row(QUEUE_TAB, number)["status_detail"])
         self.assertEqual(self.bot.channels[CHANNEL_ID].sent, [])
-        # The allowlist also accepts verified work emails.
+        # The allowlist also accepts verified personal emails.
         self.settings.test_allowed_emails = frozenset({"lead@example.com"})
         await self.poll()
         await self.jobs()

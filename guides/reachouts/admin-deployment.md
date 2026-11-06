@@ -7,7 +7,7 @@
 | `REACHOUT_SHEET_ID` | blank | Reachout spreadsheet ID. **Blank disables the feature entirely**: no loop, buttons, or commands. |
 | `REACHOUT_CHANNEL_CATEGORY_ID` | blank | Category where `reachout-<first name>` channels are created. Use a private category; in test mode, a test category. |
 | `REACHOUT_TEST_MODE` | `true` | Anything other than `false`/`0`/`no`/`off` keeps test mode on. |
-| `REACHOUT_TEST_ALLOWED_USER_IDS` | blank | Comma-separated verified work emails and/or Discord user IDs. In test mode only reachouts whose agent **and** lead are both listed are sent, and only listed leads receive DMs. |
+| `REACHOUT_TEST_ALLOWED_USER_IDS` | blank | Comma-separated verified personal emails and/or Discord user IDs. In test mode only reachouts whose agent **and** lead are both listed are sent, and only listed leads receive DMs. |
 | `REACHOUT_POLL_SECONDS` | `60` (minimum 30) | Background pass: overdue reminders and Discord job retries. Never touches Sheets; only `/reachout_poll` does. |
 | `REACHOUT_BATCH_SIZE` | `10` (1–50) | Jobs per claim. `/reachout_poll` sends every ticked row regardless. |
 | `REACHOUT_ERROR_CHANNEL_ID` | `FORM_ERROR_CHANNEL_ID` | Private channel for technical alerts (kind and reference only). The bot refuses to use a channel visible to `@everyone`. |
@@ -58,7 +58,7 @@ The service's existing `flock` keeps it to one instance, which the delivery guar
 1. **Test server or test category.** Point `REACHOUT_CHANNEL_CATEGORY_ID` at a private test
    category, and `REACHOUT_SHEET_ID` at a **test spreadsheet** created by `reachout-sheet-setup`.
 2. Keep `REACHOUT_TEST_MODE=true` and set `REACHOUT_TEST_ALLOWED_USER_IDS` to two or three test
-   accounts that are verified (`Verify Work Email`), Active in the roster, and **not** server
+   accounts that are verified (`Verify Personal Email`), Active in the roster, and **not** server
    administrators.
 3. Add those accounts to `Reachout Agents`, with one test account as another's lead.
 4. Run the [acceptance checklist](acceptance-tests.md).
@@ -89,7 +89,7 @@ Verify:
 - `/reachout_poll` in Discord answers `Poll complete: {…}` with no `poll_error`.
 - `Reachout Config` `bot_status` shows `OK` for every key.
 - `Reachout Agents` shows `directory_status` `OK` for the test agents.
-- An existing `/workflow` submission and the `Verify Work Email` button still work.
+- An existing `/workflow` submission and the `Verify Personal Email` button still work.
 
 ## 7. Recovery and reconciliation
 
@@ -126,7 +126,7 @@ SELECT reachout_id, dispatch_state, workflow_status, status_detail FROM reachout
 | Symptom | Cause / fix |
 |---|---|
 | `processing_status` = `BLOCKED`, "Test mode" | Add both agent and lead IDs to `REACHOUT_TEST_ALLOWED_USER_IDS`, or turn test mode off for production. |
-| `BLOCKED`, "has not completed Discord work-email verification" | The agent must click **Verify Work Email**. |
+| `BLOCKED`, "has not completed Discord personal-email verification" | The agent must click **Verify Personal Email**. |
 | `BLOCKED`, "not a member of the Discord server" | The agent or lead left. Re-invite them or reassign the lead. |
 | `BLOCKED`, "visible to @everyone" or "visible to N other member(s)" | Remove broad overwrites from that channel (roles, other members), or clear `existing_channel_id` to let the bot create a dedicated channel. |
 | `BLOCKED`, "REACHOUT_CHANNEL_CATEGORY_ID is not a category" | Set it to a category ID and restart. |

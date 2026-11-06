@@ -343,7 +343,7 @@ class ReachoutRepository:
         return self.one("SELECT * FROM reachout_agents WHERE agent_id=?", (agent_id,))
 
     def find_agent(self, key: str) -> dict | None:
-        """By agent_id, or by work email (case-insensitive)."""
+        """By agent_id, or by personal email (case-insensitive)."""
         key = key.strip()
         return self.get_agent(key) or self.one(
             "SELECT * FROM reachout_agents WHERE lower(agent_email)=lower(?) AND in_sheet=1", (key,))

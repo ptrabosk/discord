@@ -149,7 +149,7 @@ class FormsService:
     async def employee_identity(self, user_id: int) -> tuple[str, str, str | None]:
         email = self.verified_email(user_id)
         if not email:
-            raise PermissionError("Complete work-email verification before submitting a form.")
+            raise PermissionError("Complete personal-email verification before submitting a form.")
         record = await asyncio.to_thread(self.access_sheet.get_by_email, email)
         if not record or not truthy(record.get("Active")):
             raise PermissionError("Your verified agent record is not currently active.")

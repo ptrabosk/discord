@@ -412,7 +412,7 @@ LEAD_EMAIL_COLUMN = "Team Lead Email"
 
 
 def directory_key(row: dict) -> str:
-    """An agent's ID: agent_id if given, otherwise their work email."""
+    """An agent's ID: agent_id if given, otherwise their personal email."""
     return (row.get("agent_id") or "").strip() or (row.get("agent_email") or "").strip().lower()
 
 
@@ -475,10 +475,10 @@ def evaluate_agent_row(row: dict, roster_record: dict | None, verified_discord_i
         return values | {"directory_status": "NO_LEAD", "directory_error":
                          f"No {LEAD_EMAIL_COLUMN} in Discord Access (e.g. Leadership); reachouts are not sent."}
     if verified_discord_id is None:
-        return values | {"directory_status": "BLOCKED", "directory_error": "The agent has not completed Discord work-email verification."}
+        return values | {"directory_status": "BLOCKED", "directory_error": "The agent has not completed Discord personal-email verification."}
     if lead_discord_id is None:
         return values | {"directory_status": "BLOCKED", "directory_error":
-                         f"The team lead ({lead_email}) has not completed Discord work-email verification."}
+                         f"The team lead ({lead_email}) has not completed Discord personal-email verification."}
     if verified_discord_id == values["lead_discord_user_id"]:
         return values | {"directory_status": "INVALID", "directory_error": "An agent cannot be their own lead."}
     if not values["active"]:

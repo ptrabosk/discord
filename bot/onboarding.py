@@ -63,8 +63,8 @@ def _mask(email):
     local, domain = email.split("@",1)
     return (local[:1] + "***@" + domain) if local else "***@" + domain
 
-class EmailModal(discord.ui.Modal, title="Verify Work Email"):
-    email = discord.ui.TextInput(label="Work email", placeholder="name@company.com")
+class EmailModal(discord.ui.Modal, title="Verify Personal Email"):
+    email = discord.ui.TextInput(label="Personal email", placeholder="name@company.com")
 
     def __init__(self, sheet):
         super().__init__()
@@ -231,6 +231,6 @@ class VerifyView(discord.ui.View):
         super().__init__(timeout=None)
         self.sheet = sheet
 
-    @discord.ui.button(label="Verify Work Email", style=discord.ButtonStyle.primary, custom_id="opsbot:verify")
+    @discord.ui.button(label="Verify Personal Email", style=discord.ButtonStyle.primary, custom_id="opsbot:verify")
     async def verify(self, interaction, button):
         await interaction.response.send_modal(EmailModal(self.sheet))

@@ -104,7 +104,7 @@ To use one, copy it to a new row, change `agent_email` to a real agent, rewrite 
 
 One row per agent. The agent's name and active roster status come from the existing
 `Discord Access` tab, matched by email, and their Discord ID comes from their completed
-`Verify Work Email` step. This tab does not duplicate the roster.
+`Verify Personal Email` step. This tab does not duplicate the roster.
 
 | Column | Purpose | Type | Required | Allowed values | Default | Edited by | Example | Validation |
 |---|---|---|---|---|---|---|---|---|
@@ -117,10 +117,10 @@ One row per agent. The agent's name and active roster status come from the exist
 | `agent_name` | From the roster `First Name` + `Last Name` | Bot | — | | | Bot | `Jordan Lee` | |
 | `agent_discord_user_id` | From verification | Bot | — | | | Bot | | |
 | `lead_email` | The roster's `Team Lead Email` for this agent | Bot | — | | | Bot | `nadir@company.com` | Change the lead in `Discord Access`, not here. |
-| `lead_discord_user_id` | That lead's Discord ID, from their verification | Bot | — | | | Bot | | The lead must have completed Verify Work Email. |
+| `lead_discord_user_id` | That lead's Discord ID, from their verification | Bot | — | | | Bot | | The lead must have completed Verify Personal Email. |
 | `private_channel_id` | The channel actually used | Bot | — | | | Bot | | Filled on first delivery. |
 | `directory_status` | Directory validity | Bot | — | `OK`, `INVALID`, `BLOCKED`, `INACTIVE`, `NO_LEAD` (blank Team Lead Email, e.g. Leadership: never sent), `EXAMPLE` | | Bot | `OK` | |
-| `directory_error` | Why it is not OK | Bot | — | Text | | Bot | `The agent has not completed Discord work-email verification.` | |
+| `directory_error` | Why it is not OK | Bot | — | Text | | Bot | `The agent has not completed Discord personal-email verification.` | |
 | `directory_synced_at` | Last time the bot changed this row | Bot | — | Timestamp | | Bot | | |
 
 Deleting an agent row marks the agent inactive (their channel access is hidden) but keeps history

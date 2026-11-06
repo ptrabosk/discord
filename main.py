@@ -80,7 +80,7 @@ async def _has_component_message(channel):
 async def post_setup_message(guild):
     setup = discord.utils.get(guild.text_channels, name="initial-setup")
     if setup:
-        # The verify button goes above the doc, which tells new members to "Click Verify Work Email above".
+        # The verify button goes above the doc, which tells new members to "Click Verify Personal Email above".
         if not await _has_component_message(setup):
             await setup.send(
                 "Welcome.\n\nComplete account verification to receive access to your assigned team channels.",

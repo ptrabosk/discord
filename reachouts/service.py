@@ -181,7 +181,7 @@ class ReachoutService:
         return zone(agent["timezone"]) if agent and agent.get("timezone") else self.config.tz
 
     def test_blocked(self, user_id: int | None) -> bool:
-        """In test mode, only allowlisted users (by Discord ID, or by verified work email) are messaged."""
+        """In test mode, only allowlisted users (by Discord ID, or by verified personal email) are messaged."""
         if not self.settings.test_mode or user_id in self.settings.test_allowed:
             return False
         verified = get_verified_user(user_id) if user_id else None

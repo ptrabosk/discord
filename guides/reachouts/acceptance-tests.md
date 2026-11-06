@@ -54,7 +54,7 @@ on.
 | 35 | Channel shared with a third member | Ticked row, `/reachout_poll` | `ERROR` "visible to 1 other member(s)", nothing posted | `test_unsafe_channel_audience_blocks_delivery` |
 | 36 | Discord rejects a post (e.g. revoke the bot's Send in the category) | Ticked row, `/reachout_poll` | `SENDING` with "Retrying …" in `status_detail`. Restore the permission: delivered once. | `test_a_definite_discord_refusal…`, manual |
 | 37 | Message body containing `@everyone` and a role mention | Ticked row, `/reachout_poll` | Delivered as text; nobody but A is pinged | Covered by `allowed_mentions` assertions; manual |
-| 38 | Existing features | `/workflow` submission; Verify Work Email; `/access_status` | Unchanged | Existing `tests/test_forms.py`, `tests/test_onboarding.py`; manual |
+| 38 | Existing features | `/workflow` submission; Verify Personal Email; `/access_status` | Unchanged | Existing `tests/test_forms.py`, `tests/test_onboarding.py`; manual |
 
 Run the automated suite in a development environment, never in the production `.venv`:
 

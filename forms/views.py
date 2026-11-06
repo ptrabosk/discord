@@ -97,7 +97,7 @@ async def open_private_form(interaction: discord.Interaction, service):
     email = service.verified_email(interaction.user.id)
     if not email:
         await interaction.response.send_message(
-            "You must complete work-email verification before submitting a form.",
+            "You must complete personal-email verification before submitting a form.",
             ephemeral=True,
         )
         return

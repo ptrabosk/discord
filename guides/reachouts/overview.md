@@ -21,7 +21,7 @@ lead (never the agent) when a required item is overdue.
   registers the buttons and commands, `on_ready` starts `ReachoutLoop`, and startup runs
   `ReachoutService.init()` (table creation and lease release). `python main.py reachout-sheet-setup`
   builds the tabs without logging in to Discord.
-- **User directory.** Agents are identified by work email. First Name, Last Name and Active come from the existing
+- **User directory.** Agents are identified by personal email. First Name, Last Name and Active come from the existing
   `Discord Access` roster (`AccessSheet.all_records()`), and the Discord user ID comes from the
   existing `verified_users` table, the same mapping `/workflow` uses. `Reachout Agents` only adds what
   the roster lacks: lead, channel, timezone, and fallback.

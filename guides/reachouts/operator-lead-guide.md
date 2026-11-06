@@ -49,7 +49,7 @@ what needs attention.
 
 ### Reassigning a lead
 
-Change the agent's `Team Lead Email` in `Discord Access` (the new lead must have completed Verify Work Email). Then run `/reachout_poll`. On that poll:
+Change the agent's `Team Lead Email` in `Discord Access` (the new lead must have completed Verify Personal Email). Then run `/reachout_poll`. On that poll:
 
 - The new lead gets access to the agent's channel and the old lead's access is removed.
 - The old lead's buttons stop working ("You are not the currently assigned team lead").

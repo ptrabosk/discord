@@ -155,7 +155,7 @@ def uses_concierge_email(form_type: str, form_subtype: str | None = None) -> boo
 
 
 def shown_email(row: dict) -> str:
-    """The Concierge Email for disputes and timesheet adjustments; the work email otherwise or when none is set."""
+    """The Concierge Email for disputes and timesheet adjustments; the personal email otherwise or when none is set."""
     if uses_concierge_email(row["form_type"], row.get("form_subtype")):
         return row.get("concierge_email") or row["employee_email"]
     return row["employee_email"]
