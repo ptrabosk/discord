@@ -24,6 +24,10 @@ def can_review(interaction):
     """Form reviewers: bot admins plus Leadership."""
     return is_admin(interaction) or any(role.name == "Leadership" for role in interaction.user.roles)
 
+def has_workflow_access(interaction):
+    """Workflows members (who can use /workflow) plus bot admins."""
+    return is_admin(interaction) or any(role.name == "Workflows" for role in interaction.user.roles)
+
 def desired_roles(record):
     if not record or not truthy(record.get("Active")):
         return set()
@@ -34,13 +38,13 @@ def desired_roles(record):
         if truthy(record.get(column)):
             desired.add(role)
 
-    for email in (field(record, "Team Lead Email"), record.get("Email")):
-        team = TEAM_LEADS.get(str(email or "").strip().lower())
-        if team:
-            desired.add(ROLE_CONFIG["concierge_teams"][team])
-
     if truthy(record.get("Concierge")):
         desired.add("Concierge")
+        # Team channels are for Concierge agents only; team roles are never granted without Concierge access.
+        for email in (field(record, "Team Lead Email"), record.get("Email")):
+            team = TEAM_LEADS.get(str(email or "").strip().lower())
+            if team:
+                desired.add(ROLE_CONFIG["concierge_teams"][team])
         # Older rosters named the team directly; kept so access survives until the column is renamed.
         raw = str(record.get("Concierge Team", "")).strip()
         teams = [x.strip() for x in raw.replace(";", ",").split(",") if x.strip()]

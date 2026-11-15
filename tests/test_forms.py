@@ -410,6 +410,8 @@ class SubmitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values[HEADERS["Disputes"].index("Send ID")], "42")
         self.assertEqual(values[HEADERS["Disputes"].index("Submitted By")], "concierge@example.com")
         self.assertEqual(values[HEADERS["Disputes"].index("Dispute Reasoning")], "Not mine")
+        self.assertEqual(values[HEADERS["Disputes"].index("Agent Email")], "concierge@example.com")
+        self.assertNotIn("Submitted At UTC", HEADERS["Disputes"])
         self.assertEqual(values[0], int(datetime.fromisoformat(row["submitted_at_utc"]).timestamp()))
 
     async def test_working_location_requires_both_dates_and_records_them_as_typed(self):

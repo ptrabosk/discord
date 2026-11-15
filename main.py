@@ -9,6 +9,7 @@ from integrations.google_sheets import AccessSheet
 from bot.setup_server import run_setup
 from bot.onboarding import VerifyView
 from bot.commands import register_commands
+from bot.applications import register_applications
 from bot.sync import AccessSync, forget_removed_member
 from forms.service import FormsService, FormsSync
 from forms.views import register_forms
@@ -40,6 +41,7 @@ class OpsBot(commands.Bot):
     async def setup_hook(self):
         self.add_view(VerifyView(self.sheet))
         register_commands(self, self.sheet)
+        register_applications(self)
         register_forms(self, self.forms)
         if self.reachouts:
             register_reachouts(self, self.reachouts)

@@ -96,11 +96,17 @@ class TeamLeadRoleTests(unittest.TestCase):
         from bot import permissions
 
         with patch.dict(permissions.TEAM_LEADS, {"nadir@example.com": "Nadir"}, clear=True):
-            agent = {"Active": "TRUE", "Email": "a@example.com", "Team Lead email": "Nadir@Example.com", "QA": "TRUE"}
             base = {"Verified", "Operations", "Casual"}
-            self.assertEqual(permissions.desired_roles(agent), base | {"Concierge - Nadir", "QA"})
+            # Without Concierge access, a team lead's email grants no team role or team channels.
+            agent = {"Active": "TRUE", "Email": "a@example.com", "Team Lead email": "Nadir@Example.com", "QA": "TRUE"}
+            self.assertEqual(permissions.desired_roles(agent), base | {"QA"})
             lead = {"Active": "TRUE", "Email": "nadir@example.com", "Team Lead Email": ""}
-            self.assertIn("Concierge - Nadir", permissions.desired_roles(lead))
+            self.assertNotIn("Concierge - Nadir", permissions.desired_roles(lead))
+            # With Concierge access, the team role follows the team lead email.
+            concierge_agent = dict(agent, Concierge="TRUE")
+            self.assertEqual(permissions.desired_roles(concierge_agent), base | {"Concierge", "Concierge - Nadir", "QA"})
+            concierge_lead = dict(lead, Concierge="TRUE")
+            self.assertIn("Concierge - Nadir", permissions.desired_roles(concierge_lead))
             leader = {"Active": "TRUE", "Email": "boss@example.com", "Leadership": "TRUE", "Team Lead Email": ""}
             self.assertEqual(permissions.desired_roles(leader), base | {"Leadership"})
             old_roster = {"Active": "TRUE", "Email": "b@example.com", "Concierge": "TRUE", "Concierge Team": "Josh"}

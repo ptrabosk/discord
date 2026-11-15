@@ -6,7 +6,7 @@ import logging
 
 import discord
 
-from bot.permissions import is_admin
+from bot.permissions import has_workflow_access, is_admin
 from reachouts.domain import (
     ACKNOWLEDGMENT,
     MAX_REMINDER,
@@ -552,7 +552,7 @@ def register_reachouts(bot, service):
 
     @bot.tree.command(name="reachout_poll", description="Send the ticked rows in Reachout Queue now")
     async def reachout_poll(interaction: discord.Interaction):
-        if not is_admin(interaction):
+        if not has_workflow_access(interaction):
             await interaction.response.send_message("Not authorized.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)

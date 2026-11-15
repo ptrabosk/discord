@@ -184,6 +184,11 @@
         {
           "name": "location-change",
           "view_roles": ["Leadership", "Ops Bot Admin"]
+        },
+        {
+          "name": "wg-apps",
+          "private": true,
+          "roles": ["Workflows", "Ops Bot Admin"]
         }
       ]
     },

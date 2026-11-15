@@ -27,7 +27,7 @@ HEADERS = {
     ],
     "Disputes": [
         "Timestamp", "Submitted By", "Send ID", "Dispute Reasoning",
-        "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID", "Agent Name",
+        "Submission ID", "Submitted At ET", "Discord User ID", "Agent Email", "Agent Name",
     ],
     "Working Location": [
         "Submission ID", "Submitted At ET", "Submitted At UTC", "Discord User ID",
@@ -69,8 +69,8 @@ def sheet_values(row: dict) -> list:
         submitted_epoch = int(datetime.fromisoformat(row["submitted_at_utc"]).timestamp())
         return [
             submitted_epoch, shown_email(row), row.get("reference_message_id") or "", row["message"],
-            row["submission_id"], row["submitted_at_et"], row["submitted_at_utc"],
-            str(row["discord_user_id"]), row["employee_name"],
+            row["submission_id"], row["submitted_at_et"],
+            str(row["discord_user_id"]), shown_email(row), row["employee_name"],
         ]
     if tab == "Working Location":
         return common + [

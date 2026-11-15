@@ -45,6 +45,7 @@ Creates and manages the Discord operations server structure, controlled agent on
   - surveys
   - qa-disputes — plus QA; Leadership and Ops Bot Admin view
   - location-change — plus Leadership and Ops Bot Admin view
+  - wg-apps — private; Workflows and Ops Bot Admin only. Receives `/apply` submissions (see below)
 - QA — role locked
   - qa-announcements
   - qa-questions
@@ -86,6 +87,10 @@ Leadership. Rosters that still have a `Concierge Team` column keep working until
 plus every CONCIERGE channel listed in `config/server_structure.json` (`also_roles`).
 
 Share the access-roster Sheet with the service-account email from `credentials.json` as Viewer.
+
+## Applications (`/apply`)
+
+Anyone in the server can run `/apply`. It opens a short form (Name, Available hours per week, optional Previous experience). Available hours must be a whole number from 1 to 168. A valid submission is posted to `#wg-apps` with the applicant's mention and display name. Nothing is written to Sheets.
 
 ## Agent forms
 
@@ -133,8 +138,8 @@ The bot creates missing forms tabs when permitted. Existing tabs must have these
   Agent Email, Agent Name, Type, Category, Message, Status, Reviewed By, Reviewed At ET,
   Reviewed At UTC
 - `Disputes`: Timestamp (Unix epoch seconds of Submitted At UTC), Submitted By (Concierge Email, falling back to the personal email), Send ID
-  (the Message ID), Dispute Reasoning, Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
-  Agent Name
+  (the Message ID), Dispute Reasoning, Submission ID, Submitted At ET, Discord User ID, Agent Email (the
+  Concierge Email, falling back to the personal email), Agent Name
 - `Working Location`: Submission ID, Submitted At ET, Submitted At UTC, Discord User ID,
   Agent Email, Agent Name, Status, Start Date, End Date, New Location, Reviewed By,
   Reviewed At ET, Reviewed At UTC
