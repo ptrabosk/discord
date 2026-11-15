@@ -53,6 +53,13 @@ class AccessSync:
             audit(None, None, "SYNC_FAILED", f"Roster read: {exc!r}"[:300])
             return
         roster = {str(r.get("Email", "")).strip().lower(): r for r in records}
+        roster.pop("", None)
+        # A read can succeed and still be wrong: an emptied sheet or a renamed Email header matches no one,
+        # and acting on it would remove every member's roles in one pass.
+        if not roster:
+            log.error("Access sync skipped: the roster has no rows with an Email value")
+            audit(None, None, "SYNC_FAILED", "Roster has no rows with an Email value")
+            return
         for user_id, email in list_verified_users():
             try:
                 member = guild.get_member(user_id)

@@ -340,6 +340,17 @@ class AccessSyncTest(unittest.IsolatedAsyncioTestCase):
         sync.assert_not_awaited()
         self.assertEqual(database.count_audit_since("SYNC_FAILED", "2000-01-01"), 1)
 
+    async def test_a_roster_without_any_email_removes_nobody(self):
+        # An emptied sheet and a renamed Email header both read "successfully" and match no one.
+        for records in ([], [{"E-mail": "user1@example.com", "Active": "TRUE"}], [{"Email": "", "Active": "TRUE"}]):
+            sheet = MagicMock()
+            sheet.all_records.return_value = records
+            sync = AsyncMock(return_value=([], []))
+            with patch("bot.sync.sync_member_roles", sync):
+                await self.access_sync(sheet).sync_all()
+            sync.assert_not_awaited()
+        self.assertEqual(database.count_audit_since("SYNC_FAILED", "2000-01-01"), 3)
+
 
 
 class RemovedMemberTest(unittest.IsolatedAsyncioTestCase):
