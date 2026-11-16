@@ -55,12 +55,14 @@ def desired_roles(record):
 
     return desired
 
-async def sync_member_roles(member: discord.Member, record):
+def planned_role_changes(member, record):
+    """The managed role names a sync would add to and remove from this member. No Discord call."""
     desired = desired_roles(record)
     current = {r.name for r in member.roles if r.name in MANAGED_ROLES}
+    return desired - current, current - desired
 
-    add_names = desired - current
-    remove_names = current - desired
+async def sync_member_roles(member: discord.Member, record):
+    add_names, remove_names = planned_role_changes(member, record)
 
     add_roles = [discord.utils.get(member.guild.roles, name=n) for n in add_names]
     remove_roles = [discord.utils.get(member.guild.roles, name=n) for n in remove_names]

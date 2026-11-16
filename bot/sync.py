@@ -2,9 +2,17 @@ import asyncio
 import logging
 from discord.ext import tasks
 from database.database import list_verified_users, touch_sync, audit, get_verified_user, delete_verified_user
-from bot.permissions import sync_member_roles
+import os
+from bot.permissions import planned_role_changes, sync_member_roles
 
 log = logging.getLogger(__name__)
+
+def removal_limit(member_count):
+    """How many members one pass may remove roles from: SYNC_MAX_REMOVALS, else a fifth of them, never under 10."""
+    try:
+        return int(os.environ["SYNC_MAX_REMOVALS"])
+    except (KeyError, ValueError):
+        return max(10, member_count // 5)
 
 async def forget_removed_member(user_id, sheet):
     """Drop a removed member's verification so their email is free for the right account.
@@ -60,12 +68,32 @@ class AccessSync:
             log.error("Access sync skipped: the roster has no rows with an Email value")
             audit(None, None, "SYNC_FAILED", "Roster has no rows with an Email value")
             return
+        # Work out the whole pass before changing anyone, so a roster that is wrong in some other way
+        # (a cleared Active column, rows deleted in bulk, a renamed role column) cannot strip most of the
+        # server in one go. Members who left the server are not part of the pass and do not count.
+        planned = []
+        removing = 0
         for user_id, email in list_verified_users():
             try:
                 member = guild.get_member(user_id)
                 if not member:
                     continue
-                added, removed = await sync_member_roles(member, roster.get(email.strip().lower()))
+                record = roster.get(email.strip().lower())
+                _, remove_names = planned_role_changes(member, record)
+            except Exception as exc:
+                audit(user_id, email, "SYNC_FAILED", repr(exc))
+                continue
+            planned.append((user_id, email, member, record))
+            removing += bool(remove_names)
+        limit = removal_limit(len(planned))
+        if removing > limit:
+            details = f"Would remove roles from {removing} of {len(planned)} members (limit {limit})"
+            log.error("Access sync skipped: %s. Check the roster; set SYNC_MAX_REMOVALS for a planned change.", details)
+            audit(None, None, "SYNC_FAILED", details)
+            return
+        for user_id, email, member, record in planned:
+            try:
+                added, removed = await sync_member_roles(member, record)
                 touch_sync(user_id)
                 if added or removed:
                     audit(user_id, email, "ROLE_SYNC", f"Added={added}; Removed={removed}")

@@ -258,6 +258,8 @@ Google Sheets is the authorization source of truth.
 
 If `Active` becomes FALSE or the agent disappears from the Sheet, managed access roles are removed on the next sync.
 
+A sync pass never acts on a roster that looks damaged. It is skipped, logged as an error, and recorded as `SYNC_FAILED` when the roster has no `Email` values, or when the pass would remove roles from more members than the limit: a fifth of the verified members in the server, and never fewer than 10. For a planned change larger than that, set `SYNC_MAX_REMOVALS` in `.env` for the day and restart the bot, or use `/access_sync` per member, which is not limited.
+
 ## Security
 
 Never commit:

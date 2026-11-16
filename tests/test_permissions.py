@@ -33,5 +33,24 @@ class DesiredRolesTests(unittest.TestCase):
         self.assertEqual(desired_roles(ACTIVE | {"Active": "FALSE"}), set())
 
 
+
+class PlannedRoleChangesTests(unittest.TestCase):
+    """What a sync would do to one member, worked out without touching Discord."""
+
+    def holding(self, *roles):
+        return SimpleNamespace(roles=[SimpleNamespace(name=r) for r in roles])
+
+    def test_a_member_with_no_roster_row_loses_managed_roles_only(self):
+        from bot.permissions import planned_role_changes
+        add, remove = planned_role_changes(self.holding("Verified", "QA", "Server Booster"), None)
+        self.assertEqual((add, remove), (set(), {"Verified", "QA"}))
+
+    def test_an_active_member_gains_what_is_missing_and_keeps_the_rest(self):
+        from bot.permissions import planned_role_changes
+        add, remove = planned_role_changes(self.holding("Verified"), ACTIVE | {"QA": "TRUE"})
+        self.assertEqual(remove, set())
+        self.assertEqual(add, desired_roles(ACTIVE | {"QA": "TRUE"}) - {"Verified"})
+
+
 if __name__ == "__main__":
     unittest.main()

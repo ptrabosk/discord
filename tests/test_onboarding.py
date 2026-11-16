@@ -315,10 +315,105 @@ class AccessSyncTest(unittest.IsolatedAsyncioTestCase):
         from bot.sync import AccessSync
 
         guild = MagicMock()
-        guild.get_member.side_effect = lambda user_id: MagicMock(id=user_id)
+        guild.get_member.side_effect = lambda user_id: self.member(user_id)
         bot = MagicMock()
         bot.get_guild.return_value = guild
         return AccessSync(bot, sheet, 1, 15)
+
+    def member(self, user_id):
+        """A server member holding the roles this test gave them (none by default); None if they left."""
+        if user_id in getattr(self, "left_server", ()):
+            return None
+        if user_id in getattr(self, "unreadable", ()):
+            return MagicMock(id=user_id, roles=None)
+        roles = []
+        for name in getattr(self, "held_roles", {}).get(user_id, []):
+            role = MagicMock()
+            role.name = name
+            roles.append(role)
+        return MagicMock(id=user_id, roles=roles)
+
+    async def run_pass(self, members, active):
+        """Sync `members` verified members who all hold Verified; the first `active` have an active roster row."""
+        self.held_roles = {}
+        for user_id in range(1, members + 1):
+            database.save_verified_user(user_id, f"user{user_id}@example.com")
+            self.held_roles[user_id] = ["Verified", "Operations", "Casual"]
+        sheet = MagicMock()
+        sheet.all_records.return_value = [
+            {"Email": f"user{user_id}@example.com", "Active": "TRUE"} for user_id in range(1, active + 1)
+        ] or [{"Email": "someone-else@example.com", "Active": "TRUE"}]
+        sync = AsyncMock(return_value=([], []))
+        with patch("bot.sync.sync_member_roles", sync):
+            await self.access_sync(sheet).sync_all()
+        return sync
+
+    async def test_a_pass_that_would_strip_more_than_the_limit_changes_nobody(self):
+        sync = await self.run_pass(members=20, active=9)   # 11 would lose roles; the limit for 20 is 10
+        sync.assert_not_awaited()
+        self.assertEqual(database.count_audit_since("SYNC_FAILED", "2000-01-01"), 1)
+        self.assertEqual(
+            database.count_audit_since("SYNC_FAILED", "2000-01-01",
+                                       details="Would remove roles from 11 of 20 members (limit 10)"), 1)
+
+    async def test_members_who_left_the_server_do_not_count_toward_the_limit(self):
+        # 11 of 20 have no roster row, but 5 of those 11 are no longer in the server: 6 of 15 is under the limit.
+        self.left_server = {16, 17, 18, 19, 20}
+        sync = await self.run_pass(members=20, active=9)
+        self.assertEqual(sync.await_count, 15)
+        self.assertEqual(database.count_audit_since("SYNC_FAILED", "2000-01-01"), 0)
+
+    async def test_one_member_who_cannot_be_planned_does_not_stop_the_pass(self):
+        self.unreadable = {3}
+        sync = await self.run_pass(members=20, active=20)
+        self.assertEqual(sync.await_count, 19)
+        self.assertEqual(database.count_audit_since("SYNC_FAILED", "2000-01-01", user_id=3), 1)
+        self.assertEqual(database.count_audit_since("SYNC_FAILED", "2000-01-01"), 1)
+
+    async def test_removals_up_to_the_limit_proceed(self):
+        sync = await self.run_pass(members=20, active=10)  # exactly 10 would lose roles
+        self.assertEqual(sync.await_count, 20)
+        self.assertEqual(database.count_audit_since("SYNC_FAILED", "2000-01-01"), 0)
+
+    async def test_a_roster_whose_active_column_is_gone_changes_nobody(self):
+        self.held_roles = {}
+        for user_id in range(1, 21):
+            database.save_verified_user(user_id, f"user{user_id}@example.com")
+            self.held_roles[user_id] = ["Verified"]
+        sheet = MagicMock()
+        sheet.all_records.return_value = [{"Email": f"user{user_id}@example.com"} for user_id in range(1, 21)]
+        sync = AsyncMock(return_value=([], []))
+        with patch("bot.sync.sync_member_roles", sync):
+            await self.access_sync(sheet).sync_all()
+        sync.assert_not_awaited()
+
+    async def test_the_limit_can_be_raised_for_a_planned_change(self):
+        with patch.dict(os.environ, {"SYNC_MAX_REMOVALS": "50"}):
+            sync = await self.run_pass(members=20, active=9)
+        self.assertEqual(sync.await_count, 20)
+
+    async def test_granting_roles_is_never_capped(self):
+        for user_id in range(1, 31):
+            database.save_verified_user(user_id, f"user{user_id}@example.com")
+        sheet = MagicMock()
+        sheet.all_records.return_value = [
+            {"Email": f"user{user_id}@example.com", "Active": "TRUE"} for user_id in range(1, 31)]
+        sync = AsyncMock(return_value=([], []))
+        with patch("bot.sync.sync_member_roles", sync):
+            await self.access_sync(sheet).sync_all()
+        self.assertEqual(sync.await_count, 30)
+
+    def test_the_default_limit_is_a_fifth_of_the_members_and_never_under_ten(self):
+        from bot.sync import removal_limit
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SYNC_MAX_REMOVALS", None)
+            self.assertEqual(removal_limit(112), 22)
+            self.assertEqual(removal_limit(20), 10)
+            self.assertEqual(removal_limit(0), 10)
+        with patch.dict(os.environ, {"SYNC_MAX_REMOVALS": "3"}):
+            self.assertEqual(removal_limit(112), 3)
+        with patch.dict(os.environ, {"SYNC_MAX_REMOVALS": "not a number"}):
+            self.assertEqual(removal_limit(112), 22)
 
     async def test_the_roster_is_read_once_per_pass(self):
         sheet = MagicMock()
