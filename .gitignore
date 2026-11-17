@@ -16,3 +16,4 @@ token.json
 AGENTS.md
 CLAUDE.md
 .claude/
+config/reachout_team_categories.json

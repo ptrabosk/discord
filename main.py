@@ -55,7 +55,7 @@ bot = OpsBot()
 async def on_ready():
     print(f"Logged in as {bot.user} ({bot.user.id})")
     # `main.py setup` only builds the server; it must not sync roles, write Sheets, or send reachouts.
-    if len(sys.argv) > 1 and sys.argv[1].lower() in ("setup", "refresh-docs"):
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("setup", "refresh-docs", "move-team-channels"):
         return
     if not hasattr(bot, "_access_sync"):
         bot._access_sync = AccessSync(bot, bot.sheet, GUILD_ID, SYNC_MINUTES)
@@ -119,6 +119,15 @@ async def refresh_docs_when_ready():
     print("Channel docs refreshed.")
     await bot.close()
 
+async def run_team_moves_when_ready():
+    # Dry run unless --apply is given. Only moves channels; nothing is sent or changed in Sheets.
+    await bot.wait_until_ready()
+    try:
+        for line in await bot.reachouts.team_moves(apply="--apply" in sys.argv):
+            print(line)
+    finally:
+        await bot.close()
+
 async def run_setup_when_ready():
     await bot.wait_until_ready()
     guild = bot.get_guild(GUILD_ID)
@@ -163,10 +172,12 @@ if __name__ == "__main__":
         sys.exit(backfill_verified())
     init_db()
     bot.forms.repository.init()
-    if bot.reachouts:
+    # init() releases every job lease, which would undo the running service's claims; the move run needs none of it.
+    if bot.reachouts and not (len(sys.argv) > 1 and sys.argv[1].lower() == "move-team-channels"):
         bot.reachouts.init()
-    if len(sys.argv) > 1 and sys.argv[1].lower() in ("setup", "refresh-docs"):
-        ready_task = run_setup_when_ready if sys.argv[1].lower() == "setup" else refresh_docs_when_ready
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ("setup", "refresh-docs", "move-team-channels"):
+        ready_task = {"setup": run_setup_when_ready, "refresh-docs": refresh_docs_when_ready,
+                      "move-team-channels": run_team_moves_when_ready}[sys.argv[1].lower()]
         async def runner():
             task = asyncio.create_task(ready_task())
             try:

@@ -572,6 +572,20 @@ def register_reachouts(bot, service):
         stats = await service.sync_sheets()
         await interaction.followup.send(f"Sync complete: {stats}", ephemeral=True)
 
+    @bot.tree.command(name="reachout_move_channel",
+                      description="Move a reachout agent channel to another category, keeping its access")
+    async def reachout_move_channel(interaction: discord.Interaction, channel: discord.TextChannel,
+                                    category: discord.CategoryChannel):
+        if not is_admin(interaction):
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            message = await service.move_agent_channel(channel, category)
+        except discord.HTTPException as exc:
+            message = f"Move failed: {type(exc).__name__}: {clip(str(exc), 300)}"
+        await interaction.followup.send(message, ephemeral=True)
+
     @bot.tree.command(name="reachout_retry_failed", description="Retry reachout deliveries that failed permanently")
     async def reachout_retry_failed(interaction: discord.Interaction):
         if not is_admin(interaction):

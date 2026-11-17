@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 
 import gspread
@@ -15,6 +16,21 @@ from reachouts.domain import (
     REACHOUT_TYPES,
     ReachoutConfig,
 )
+
+# Sheets allows a limited number of write requests per minute per user, and one poll makes several.
+# A 429 means the request was refused, so repeating it after the window resets is safe.
+QUOTA_ATTEMPTS = 3
+QUOTA_WAIT_SECONDS = 65
+
+
+def _retry_quota(call):
+    for attempt in range(1, QUOTA_ATTEMPTS + 1):
+        try:
+            return call()
+        except gspread.exceptions.APIError as exc:
+            if exc.code != 429 or attempt == QUOTA_ATTEMPTS:
+                raise
+            time.sleep(QUOTA_WAIT_SECONDS)
 
 QUEUE_TAB = "Reachout Queue"
 AGENTS_TAB = "Reachout Agents"
@@ -184,10 +200,11 @@ class ReachoutSheet:
         with self._lock:
             for start in range(0, len(updates), 2000):
                 chunk = updates[start:start + 2000]
-                self.spreadsheet().values_batch_update({
+                body = {
                     "valueInputOption": "RAW",
                     "data": [{"range": _a1(tab, row, col), "values": [[value]]} for tab, row, col, value in chunk],
-                })
+                }
+                _retry_quota(lambda: self.spreadsheet().values_batch_update(body))
 
     def write_by_key(self, tab: str, key: str, values: dict[str, dict[str, str]]):
         """Write cells to the rows whose key column holds each key, located just before writing.
@@ -237,11 +254,11 @@ class ReachoutSheet:
         self.write(updates)
         with self._lock:
             for tab, rows in appends.items():
-                self.spreadsheet().values_append(
+                _retry_quota(lambda tab=tab, rows=rows: self.spreadsheet().values_append(
                     f"'{tab}'!A1",
                     params={"valueInputOption": "RAW", "insertDataOption": "INSERT_ROWS"},
                     body={"values": rows},
-                )
+                ))
 
     # --- template -----------------------------------------------------------------------
 

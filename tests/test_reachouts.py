@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -455,7 +456,7 @@ class DispatchTests(WorkflowBase):
         created = {}
 
         class Category:
-            pass
+            channels = []
 
         async def create_text_channel(name, **kwargs):
             channel = FakeChannel(self.bot, 777777777777777777, self.bot.guild)
@@ -1329,6 +1330,71 @@ class SnoozeViewTests(unittest.IsolatedAsyncioTestCase):
         stranger = SimpleNamespace(user=SimpleNamespace(id=AGENT_ID), response=SimpleNamespace(send_message=send))
         self.assertFalse(await SnoozeView("NDG-20261031-0000000A", owner_id=LEAD_ID).interaction_check(stranger))
         send.assert_awaited_once()
+
+
+class ChannelCategoryTests(unittest.TestCase):
+    """New agent channels spill into the overflow category once the main one has 50 channels."""
+
+    class Category:
+        def __init__(self, cid, count):
+            self.id = cid
+            self.name = f"cat{cid}"
+            self.channels = [object()] * count
+            self.overwrites = {}
+
+    def service(self, main_count, overflow=None, overflow_id=0):
+        cats = {1: self.Category(1, main_count)}
+        if overflow is not None:
+            cats[overflow_id] = self.Category(overflow_id, overflow)
+        guild = SimpleNamespace(get_channel=lambda cid: cats.get(cid))
+        svc = ReachoutService.__new__(ReachoutService)
+        svc.settings = Settings(sheet_id="x", poll_seconds=60, batch=10, category_id=1, test_mode=False,
+                                test_allowed=frozenset(), error_channel_id=0, overflow_category_id=overflow_id)
+        return svc, guild
+
+    def test_uses_main_category_while_room(self):
+        with patch("reachouts.service.discord.CategoryChannel", self.Category):
+            svc, guild = self.service(49)
+            self.assertEqual(asyncio.run(svc.channel_category(guild)).id, 1)
+
+    def test_spills_to_overflow_when_main_is_full(self):
+        with patch("reachouts.service.discord.CategoryChannel", self.Category):
+            svc, guild = self.service(50, overflow=3, overflow_id=2)
+            self.assertEqual(asyncio.run(svc.channel_category(guild)).id, 2)
+
+    def test_blocks_clearly_when_no_overflow_is_configured(self):
+        with patch("reachouts.service.discord.CategoryChannel", self.Category):
+            svc, guild = self.service(50)
+            with self.assertRaisesRegex(Exception, "REACHOUT_CHANNEL_OVERFLOW_CATEGORY_ID"):
+                asyncio.run(svc.channel_category(guild))
+
+    def test_blocks_when_overflow_is_also_full(self):
+        with patch("reachouts.service.discord.CategoryChannel", self.Category):
+            svc, guild = self.service(50, overflow=50, overflow_id=2)
+            with self.assertRaisesRegex(Exception, "also full"):
+                asyncio.run(svc.channel_category(guild))
+
+    def test_team_lead_gets_their_team_category_created_once(self):
+        with patch("reachouts.service.discord.CategoryChannel", self.Category):
+            svc, guild = self.service(50)
+            svc.team_categories = {42: "reachouts-example"}
+            made = self.Category(9, 0)
+            made.name = "reachouts-example"
+            guild.categories = []
+            guild.create_category = AsyncMock(return_value=made)
+            self.assertIs(asyncio.run(svc.channel_category(guild, 42)), made)
+            guild.create_category.assert_awaited_once()
+            self.assertEqual(guild.create_category.await_args.args[0], "reachouts-example")
+            guild.categories = [made]
+            guild.create_category.reset_mock()
+            self.assertIs(asyncio.run(svc.channel_category(guild, 42)), made)
+            guild.create_category.assert_not_awaited()
+
+    def test_other_leads_still_use_the_shared_category(self):
+        with patch("reachouts.service.discord.CategoryChannel", self.Category):
+            svc, guild = self.service(10)
+            svc.team_categories = {42: "reachouts-example"}
+            self.assertEqual(asyncio.run(svc.channel_category(guild, 7)).id, 1)
 
 
 if __name__ == "__main__":

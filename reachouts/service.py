@@ -126,6 +126,7 @@ class Settings:
     test_allowed: frozenset[int]
     error_channel_id: int
     test_allowed_emails: frozenset[str] = frozenset()
+    overflow_category_id: int = 0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -136,6 +137,7 @@ class Settings:
             poll_seconds=max(30, _int_env("REACHOUT_POLL_SECONDS", 60)),
             batch=max(1, min(_int_env("REACHOUT_BATCH_SIZE", 10), 50)),
             category_id=_int_env("REACHOUT_CHANNEL_CATEGORY_ID", 0),
+            overflow_category_id=_int_env("REACHOUT_CHANNEL_OVERFLOW_CATEGORY_ID", 0),
             # Test mode is on unless explicitly turned off, and only in .env: a Sheets editor cannot disable it.
             test_mode=os.getenv("REACHOUT_TEST_MODE", "true").strip().lower() not in {"false", "0", "no", "off"},
             test_allowed=frozenset(allowed),
@@ -148,6 +150,22 @@ class Permanent(Exception):
     """A job that retrying cannot fix without someone changing something."""
 
 
+CATEGORY_CHANNEL_LIMIT = 50  # Discord refuses a 51st channel in one category (error 50035).
+TEAM_CATEGORIES_FILE = Path(__file__).resolve().parent.parent / "config" / "reachout_team_categories.json"
+
+
+def load_team_categories() -> dict[int, str]:
+    """Team lead's Discord ID -> category name, e.g. {"000000000000000000": "reachouts-example"}.
+
+    Agents whose lead is not listed keep the shared reachout category.
+    """
+    try:
+        raw = json.loads(TEAM_CATEGORIES_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    return {int(lead): str(name) for lead, name in raw.items()}
+
+
 class Blocked(Exception):
     """An environment problem (membership, permissions, audience) shown to operators in Sheets."""
 
@@ -157,6 +175,7 @@ class ReachoutService:
         self.bot = bot
         self.access_sheet = access_sheet
         self.settings = settings or Settings.from_env()
+        self.team_categories = load_team_categories()
         self.repo = repo or ReachoutRepository()
         self.sheet = sheet or ReachoutSheet(access_sheet.client, self.settings.sheet_id)
         self.config: ReachoutConfig = ReachoutConfig()
@@ -763,6 +782,89 @@ class ReachoutService:
             return f"Channel {channel.id} is visible to {len(others)} other member(s), e.g. Discord user {others[0]}."
         return None
 
+    async def channel_category(self, guild, lead_id: int | None = None) -> discord.CategoryChannel:
+        """Where a new agent channel goes.
+
+        A team with a category in the config file gets its own category (created on first use, with the main
+        category's permissions). Other agents use the main category, then the overflow one once it is full.
+        """
+        category = guild.get_channel(self.settings.category_id)
+        if not isinstance(category, discord.CategoryChannel):
+            raise Blocked("REACHOUT_CHANNEL_CATEGORY_ID is not a category in this server.")
+        team = self.team_categories.get(lead_id) if lead_id else None
+        if team:
+            return await self.team_category(guild, team, category)
+        if len(category.channels) < CATEGORY_CHANNEL_LIMIT:
+            return category
+        overflow = guild.get_channel(self.settings.overflow_category_id)
+        if not isinstance(overflow, discord.CategoryChannel):
+            raise Blocked("The reachout category is full (50 channels). Set REACHOUT_CHANNEL_OVERFLOW_CATEGORY_ID "
+                          "to a category with room, or move channels out with /reachout_move_channel.")
+        if len(overflow.channels) >= CATEGORY_CHANNEL_LIMIT:
+            raise Blocked("The reachout overflow category is also full (50 channels).")
+        return overflow
+
+    async def team_category(self, guild, name: str, main: discord.CategoryChannel) -> discord.CategoryChannel:
+        existing = [c for c in guild.categories if c.name == name]
+        if existing:
+            category = existing[0]
+        else:
+            category = await guild.create_category(
+                name, overwrites=main.overwrites, reason="Reachout team category")
+        if len(category.channels) >= CATEGORY_CHANNEL_LIMIT:
+            raise Blocked(f"{name} already has {CATEGORY_CHANNEL_LIMIT} channels. Create another team category "
+                          "or move channels out with /reachout_move_channel.")
+        return category
+
+    async def team_moves(self, *, apply: bool) -> list[str]:
+        """Move every agent channel whose lead has a team category into that category.
+
+        Dry run unless apply is set. Channel IDs do not change, so the database needs no update.
+        """
+        guild = self.guild()
+        main = guild.get_channel(self.settings.category_id)
+        if not isinstance(main, discord.CategoryChannel):
+            raise Blocked("REACHOUT_CHANNEL_CATEGORY_ID is not a category in this server.")
+        lines = []
+        for agent in self.repo.agents():
+            name = agent["agent_first_name"] or agent["agent_id"]
+            team = self.team_categories.get(agent["lead_discord_user_id"])
+            if not team:
+                continue
+            channel = guild.get_channel(agent["private_channel_id"] or agent["existing_channel_id"] or 0)
+            if not isinstance(channel, discord.TextChannel):
+                lines.append(f"skip {name}: no channel in Discord")
+                continue
+            if channel.category and channel.category.name == team:
+                continue
+            if not apply:
+                lines.append(f"would move {channel.name} to {team}")
+                continue
+            try:
+                category = await self.team_category(guild, team, main)
+                lines.append(await self.move_agent_channel(channel, category))
+            except (Blocked, discord.HTTPException) as exc:
+                lines.append(f"failed {channel.name}: {exc}")
+        return lines or ["Nothing to move: every team channel is already in its team category."]
+
+    async def move_agent_channel(self, channel: discord.TextChannel, category: discord.CategoryChannel) -> str:
+        """Move a channel to another category and keep who can see it.
+
+        sync_permissions=False keeps the channel's own overwrites (agent, lead, bot) instead of copying the
+        new category's, and the result is compared with the old overwrites to confirm nothing changed.
+        """
+        if channel.category_id == category.id:
+            return f"{channel.name} is already in {category.name}."
+        if len(category.channels) >= CATEGORY_CHANNEL_LIMIT:
+            return f"{category.name} already has {CATEGORY_CHANNEL_LIMIT} channels; pick another category."
+        before = dict(channel.overwrites)
+        moved = await channel.edit(category=category, sync_permissions=False,
+                                   reason="Reachout channel moved by an operator")
+        if dict(moved.overwrites) != before:
+            return (f"Moved {channel.name} to {category.name}, but its permissions changed. "
+                    "Check who can see it before you rely on it.")
+        return f"Moved {channel.name} to {category.name}. Access is unchanged."
+
     async def agent_channel(self, agent: dict) -> discord.TextChannel:
         guild = self.guild()
         if not guild:
@@ -774,9 +876,7 @@ class ReachoutService:
                 if channel:
                     break
         if channel is None:
-            category = guild.get_channel(self.settings.category_id)
-            if not isinstance(category, discord.CategoryChannel):
-                raise Blocked("REACHOUT_CHANNEL_CATEGORY_ID is not a category in this server.")
+            category = await self.channel_category(guild, agent["lead_discord_user_id"])
             # Named for the agent's first name; the bot tracks it by ID, so a duplicate name is harmless.
             label = agent["agent_first_name"] or agent["agent_id"]
             name = "reachout-" + (re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or agent["agent_id"].lower())[:80]
