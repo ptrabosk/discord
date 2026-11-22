@@ -37,6 +37,20 @@ def register_commands(bot, sheet):
         audit(member.id, email, "MANUAL_SYNC", f"By={interaction.user.id}; Added={added}; Removed={removed}")
         await interaction.response.send_message(f"Added: {added or 'None'}\nRemoved: {removed or 'None'}", ephemeral=True)
 
+    @bot.tree.command(name="access_sync_all", description="Synchronize managed roles for every verified member now")
+    async def access_sync_all(interaction: discord.Interaction):
+        if not is_admin(interaction):
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+            return
+        access_sync = getattr(bot, "_access_sync", None)
+        if access_sync is None:
+            await interaction.response.send_message("The access sync is not running yet. Try again in a minute.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        summary = await access_sync.sync_all()
+        audit(None, None, "MANUAL_SYNC_ALL", f"By={interaction.user.id}; {summary}"[:300])
+        await interaction.followup.send(summary, ephemeral=True)
+
     @bot.tree.command(name="access_reset", description="Remove a member's managed roles and forget their verification")
     async def access_reset(interaction: discord.Interaction, member: discord.Member):
         if not is_admin(interaction):

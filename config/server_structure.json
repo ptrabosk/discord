@@ -10,6 +10,7 @@
     "Concierge - Nadir",
     "Concierge - Josh",
     "Concierge - Thaniel",
+    "New Agents",
     "Workflows",
     "Leadership",
     "QA",
@@ -153,6 +154,11 @@
         {
           "name": "team-thaniel",
           "role": "Concierge - Thaniel"
+        },
+        {
+          "name": "new-agents",
+          "private": true,
+          "view_roles": ["New Agents", "Leadership", "Moderator", "Ops Bot Admin"]
         },
         {
           "name": "shift-releases",

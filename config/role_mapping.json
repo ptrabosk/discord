@@ -10,6 +10,7 @@
     "Concierge - Nadir",
     "Concierge - Josh",
     "Concierge - Thaniel",
+    "New Agents",
     "Workflows",
     "Leadership",
     "QA",
@@ -19,6 +20,7 @@
   "verified_roles": ["Operations", "Casual"],
   "sheet_columns": {
     "Professional Services": "Professional Services",
+    "New": "New Agents",
     "White Glove": "White Glove",
     "Growth Strategy": "Growth Strategy",
     "Order Operations": "Order Operations",

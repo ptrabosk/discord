@@ -38,6 +38,8 @@ class AccessSync:
         self.bot = bot
         self.sheet = sheet
         self.guild_id = guild_id
+        # The timer and /access_sync_all share one pass at a time.
+        self._pass_lock = asyncio.Lock()
         self.loop.change_interval(minutes=minutes)
 
     @tasks.loop(minutes=15)
@@ -49,9 +51,14 @@ class AccessSync:
             log.exception("Access sync pass failed")
 
     async def sync_all(self):
+        """Run one pass over every verified member. Returns a one-line summary for the admin who asked."""
+        async with self._pass_lock:
+            return await self._run_pass()
+
+    async def _run_pass(self):
         guild = self.bot.get_guild(self.guild_id)
         if not guild:
-            return
+            return "Skipped: the bot is not connected to the server yet."
         # One roster read per pass, not one per member: Sheets allows about 60 reads a minute.
         # If it fails, skip the pass rather than treat everyone as missing and remove their roles.
         try:
@@ -59,7 +66,7 @@ class AccessSync:
         except Exception as exc:
             log.exception("Access sync could not read the roster")
             audit(None, None, "SYNC_FAILED", f"Roster read: {exc!r}"[:300])
-            return
+            return "Skipped: the roster could not be read. Details are in the audit log."
         roster = {str(r.get("Email", "")).strip().lower(): r for r in records}
         roster.pop("", None)
         # A read can succeed and still be wrong: an emptied sheet or a renamed Email header matches no one,
@@ -67,7 +74,7 @@ class AccessSync:
         if not roster:
             log.error("Access sync skipped: the roster has no rows with an Email value")
             audit(None, None, "SYNC_FAILED", "Roster has no rows with an Email value")
-            return
+            return "Skipped: the roster has no rows with an Email value."
         # Work out the whole pass before changing anyone, so a roster that is wrong in some other way
         # (a cleared Active column, rows deleted in bulk, a renamed role column) cannot strip most of the
         # server in one go. Members who left the server are not part of the pass and do not count.
@@ -90,15 +97,18 @@ class AccessSync:
             details = f"Would remove roles from {removing} of {len(planned)} members (limit {limit})"
             log.error("Access sync skipped: %s. Check the roster; set SYNC_MAX_REMOVALS for a planned change.", details)
             audit(None, None, "SYNC_FAILED", details)
-            return
+            return f"Skipped: {details}. Check the roster, then run again."
+        changed = 0
         for user_id, email, member, record in planned:
             try:
                 added, removed = await sync_member_roles(member, record)
                 touch_sync(user_id)
                 if added or removed:
+                    changed += 1
                     audit(user_id, email, "ROLE_SYNC", f"Added={added}; Removed={removed}")
             except Exception as exc:
                 audit(user_id, email, "SYNC_FAILED", repr(exc))
+        return f"Sync finished: {len(planned)} verified members checked, {changed} changed."
 
     @loop.before_loop
     async def before_loop(self):

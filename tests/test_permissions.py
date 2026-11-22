@@ -28,6 +28,11 @@ class DesiredRolesTests(unittest.TestCase):
         roles = desired_roles(ACTIVE | {"Workflows": "TRUE"})
         self.assertTrue({"Verified", "Operations", "Casual", "Workflows"} <= roles)
 
+    def test_new_column_grants_the_new_agents_role_only_when_true(self):
+        self.assertIn("New Agents", desired_roles(ACTIVE | {"New": "TRUE"}))
+        self.assertNotIn("New Agents", desired_roles(ACTIVE | {"New": "FALSE"}))
+        self.assertNotIn("New Agents", desired_roles(ACTIVE))
+
     def test_inactive_or_missing_record_gets_nothing(self):
         self.assertEqual(desired_roles(None), set())
         self.assertEqual(desired_roles(ACTIVE | {"Active": "FALSE"}), set())
