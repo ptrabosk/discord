@@ -206,9 +206,11 @@ Windows:
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt -c constraints.txt
 copy .env.example .env
 ```
+
+`constraints.txt` pins every package, direct and indirect, to a tested, advisory-free set, so a rebuilt environment matches the one that runs. To update it, install `requirements.txt` into a fresh virtual environment with the new floors, run the tests, check the result for advisories (OSV), and save `pip freeze` without pip, setuptools and wheel.
 
 Fill `.env` and put the Google service-account JSON at `credentials.json`.
 
@@ -218,7 +220,7 @@ Use a separate development environment so the production virtual environment sta
 
 ```bash
 python -m venv .venv-dev
-.venv-dev/bin/pip install -r requirements-dev.txt
+.venv-dev/bin/pip install -r requirements-dev.txt -c constraints.txt
 .venv-dev/bin/python -m pytest
 ```
 
